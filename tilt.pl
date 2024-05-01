@@ -6,6 +6,9 @@
 #
 # Revision   Date       Comments
 # Initial    11/28/23   Initial development
+# 1.01       04/30/24   Use Tilt logo as window icon
+#                       packPropagate to resize window as devices are added/removed
+#                       minor bug fixes
 #
 # File: tilt.pl
 # Purpose: Read low energy bluetooth iBeacon data from Tilt hydrometer devices.
@@ -27,7 +30,7 @@ use Time::HiRes qw/time/;
 use LWP::UserAgent;
 use Tk;
 use Tk::PNG;
-use Data::Dumper;
+use Tk::JPEG;
 
 # turn on level 1 or 2 debug for troubleshooting
 my $DEBUG = 0;
@@ -264,8 +267,8 @@ sub updateTilt {
   my $sg_raw = $sg;
   my $temp_raw = $temp;
 
-  $sg += $cal{$name}{'sg'} if ( defined $cal{$name}{'sg'} );
-  $temp += $cal{$name}{'temp'} if ( defined $cal{$name}{'temp'} );
+  $sg += $cal{$name}{'sg'} if ( defined $cal{$name}{'sg'} && $cal{$name}{'sg'} ne '' );
+  $temp += $cal{$name}{'temp'} if ( defined $cal{$name}{'temp'} && $cal{$name}{'temp'} ne '' );
 
   ${ $disp{$name}->{'sg_label'}  } = 'Specific gravity: ' . sprintf( $is_pro ? "%.04f" : "%.03f", $sg_raw ) . ' (uncal)';
   ${ $disp{$name}->{'sg'}        } = sprintf( $is_pro ? "%.04f" : "%.03f", $sg );
@@ -351,8 +354,11 @@ sub initGUI {
   $mw->protocol( 'WM_DELETE_WINDOW', \&quit );
   $SIG{INT} = \&quit;
 
+  $mw->packPropagate(1);
+
   # load the Tilt logo
   $logo = $mw->Photo( -file => './tilt_logo.png' );
+  $mw->iconimage( $mw->Photo( -file => './tilt_icon.jpg' ) );
 
   # create some fonts
   $tinyFont  = $mw->fontCreate( 'tiny',  -family => 'Courier',   -size => 9,  -weight => 'bold' );

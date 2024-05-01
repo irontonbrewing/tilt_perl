@@ -14,12 +14,12 @@ BACKGROUND:
     Yes, it's "old", but perl 5 is still maintained and updated, and I prefer the syntax over Python.
 
 LEGAL:
-    I have full permisson from Tilt (Noah Nibarron) to "sandbox" with their data format. This program
-    is in no way intended to circumvent, override, or plagiarize any of Tilt's own software. This program
-    offers no warranty, guarantee, or support mechanism. This program as designed, simply reads data over
-    a BLE (bluetooth low energy) digital singal and posts formatted information to a web URL. The intended
-    use of this software is to read Tilt digital hydrometer data for use in tracking beer fermentation
-    progress, for use in beer brewing, or other liquid density applications only.
+    I have full permisson from Tilt (Noah Nibarron) to "sandbox" with their data format and to use their logo.
+    This program is in no way intended to circumvent, override, or plagiarize any of Tilt's own software.
+    This program offers no warranty, guarantee, or support mechanism. This program as designed, reads data over
+    a BLE (bluetooth low energy) digital signal and posts formatted information to a web URL. The intended
+    use of this software is to read Tilt digital hydrometer data for tracking beer fermentation progress,
+    for use in brewing beer, or other liquid density applications only.
 
 SYSTEM REQUIREMENTS:
     this program is only written and tested with Unix/Linux operating systems in mind.
@@ -54,6 +54,38 @@ sudo cpan App::cpanminus
 sudo cpanm LWP::UserAgent
 
 # if you want to run hcitool and hcidump as a normal user, grant the appropriate capabilites to the executables
+# then remove the 'sudo' calls in the perl script
 # note this may have security implications
 sudo setcap 'cap_net_raw,cap_net_admin+eip' `which hcitool`
 sudo setcap 'cap_net_raw,cap_net_admin+eip' `which hciconfig`
+
+
+TO USE:
+
+1) In a terminal window, simply exectue the program
+    >> tilt.pl
+
+2) A generic "searching" screen is displayed until a Tilt is detected
+    -if nothing appears within 30 seconds or so, make sure your Tilt is on, floating, and in range.
+    -also make sure there is no obvious source of bluetooth interference, and that your device's
+     bluetooth is functioning in general
+
+3) The Tilt status will appear in place of the search window once a Tilt device is found.
+   -data is updated automatically in real time.
+
+4) To start URL web-end logging:
+    a) Configure => Logging => <color> => Setup Log
+    b) In the new popup window, enter the URL end-point, a logging interval (in minutes, minimum 15), and a beer name
+    c) Click START
+    d) any errors will be displayed in the "Status:" area
+
+5) To add a calibration offset:
+    a) Configure => Calibrate => <color> => <cal choice>
+    b) Manual calibrations will open a popup window to enter the offset
+    c) Note: only a single calibration offset is currently supported.
+             device level calibration in prepared sugar solutions is recommended
+    d) Note: calibration will be applied upon the next subsequent reading
+
+6) Any logging or calibration settings will be automatically saved to a config.ini
+    file in the local directory, then automatically loaded on the next program start.
+    The settings saved are color-specific and can support multiple devices.
