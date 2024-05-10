@@ -19,7 +19,7 @@ LEGAL:
     This program offers no warranty, guarantee, or support mechanism. This program as designed, reads data over
     a BLE (bluetooth low energy) digital signal and posts formatted information to a web URL. The intended
     use of this software is to read Tilt digital hydrometer data for tracking beer fermentation progress,
-    for use in brewing beer, or other liquid density applications only.
+    for use in brewing beer, or other liquid density applications only. Please see LICENSE.txt for full licensing.
 
 SYSTEM REQUIREMENTS:
     this program is only written and tested with Unix/Linux operating systems in mind.
