@@ -14,7 +14,7 @@ BACKGROUND:
     Yes, it's "old", but perl 5 is still maintained and updated, and I prefer the syntax over Python.
 
 LEGAL:
-    I have full permisson from Tilt (Noah Nibarron) to "sandbox" with their data format and to use their logo.
+    I have full permission from Tilt (Noah Nibarron) to "sandbox" with their data format and to use their logo.
     This program is in no way intended to circumvent, override, or plagiarize any of Tilt's own software.
     This program offers no warranty, guarantee, or support mechanism. This program as designed, reads data over
     a BLE (bluetooth low energy) digital signal and posts formatted information to a web URL. The intended
@@ -53,7 +53,7 @@ sudo cpan App::cpanminus
 # note this will also install a LOT of dependencies (but good ones!)
 sudo cpanm LWP::UserAgent
 
-# if you want to run hcitool and hcidump as a normal user, grant the appropriate capabilites to the executables
+# if you want to run hcitool and hcidump as a normal user, grant the appropriate capabilities to the executables
 # then remove the 'sudo' calls in the perl script
 # note this may have security implications
 sudo setcap 'cap_net_raw,cap_net_admin+eip' `which hcitool`
@@ -62,7 +62,7 @@ sudo setcap 'cap_net_raw,cap_net_admin+eip' `which hciconfig`
 
 TO USE:
 
-1) In a terminal window, simply exectue the program
+1) In a terminal window, simply execute the program
     >> tilt.pl
 
 2) A generic "searching" screen is displayed until a Tilt is detected
