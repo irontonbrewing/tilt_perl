@@ -377,7 +377,9 @@ sub lastHeard {
       next;
     }
 
-    my $delta = time - ${ $disp{$name}->{'time'} };
+    my $delta = 0;
+    my $last_time = ${ $disp{$name}->{'time'} };
+    $delta = time - $last_time if ( defined $last_time && $last_time > 0 );
 
     if ( $delta > $TIMEOUT ) {
       deleteTilt($name);
