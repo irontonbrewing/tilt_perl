@@ -9,6 +9,7 @@
 # 1.01       04/30/24   Use Tilt logo as window icon
 #                       packPropagate to resize window as devices are added/removed
 #                       minor bug fixes
+# 1.1        02/01/25   Move bluetooth packet reading to separate thread
 #
 # File: tilt.pl
 # Purpose: Read low energy bluetooth iBeacon data from Tilt hydrometer devices.
@@ -22,15 +23,21 @@
 #
 ###################################################################################
 
+# packages
 use strict;
 use warnings;
 no warnings 'experimental::smartmatch';
+
 use POSIX qw/mktime strftime/;
 use Time::HiRes qw/time/;
 use LWP::UserAgent;
+
 use Tk;
 use Tk::PNG;
 use Tk::JPEG;
+
+use threads;
+use Thread::Queue;
 
 # turn on level 1 or 2 debug for troubleshooting
 my $DEBUG = 0;
@@ -69,6 +76,8 @@ map { $colors{$_} = $_ } @names;
 $colors{'green'} = 'ForestGreen';
 $colors{ $names[0] } = $bg;
 
+# global queue for passing complete beacon messages from the reading thread to the main thread
+my $btQueue = Thread::Queue->new();
 
 # build the Tk MainWindow
 my $mw = MainWindow->new( -title => 'Tilt Hydrometer' );
@@ -78,24 +87,18 @@ initGUI();
 # read in initial config options
 loadOpts();
 
-# this is the main command for scanning/reading iBeacons (BT data)
-# open a pipe for the command so it forks and continues to run in the background
-# hci0 = built-in Bluetooth antenna
-# hci1 = first additional antenna
-# hcix = other antenna
-my $bytes;
-my $cmd = 'sudo hcitool -i hci0 lescan --duplicates | sudo hcidump -i hci0 -tR';
-my $child = open BT, '-|', "$cmd";
+# start the BT scanning in a separate thread
+my $bt_thread = threads->create(\&readBeacon);
 
-# schedule a periodic read of BT data from the command pipe
-# this should be very fast to avoid the handle from becoming filled and things getting behind
-$mw->repeat( 5, \&readBeacon );
+# poll our the BT queue every 50ms
+$mw->repeat(50, \&processBeacon);
 
 # check for the last recieved signal every half second
 $mw->repeat( 500, \&lastHeard );
 
 # periodic logger, to be started later
 my $logger;
+$log{'green'}{'timer'} = $mw->repeat( 15 * 60 * 1000, [ \&logPoint, 'green' ] );
 
 
 # start the Tk loop
@@ -108,33 +111,77 @@ MainLoop;
 
 sub readBeacon {
 
+  # this is the main command for scanning/reading iBeacons (BT data)
+  # hci0 = built-in Bluetooth antenna
+  # hci1 = first additional antenna
+  # hcix = other antenna
+
+  my $cmd = 'sudo hcitool -i hci0 lescan --duplicates | sudo hcidump -i hci0 -tR';
+  open(my $BT, '-|', $cmd) or die "Cannot run '$cmd': $!";
+
+  my $bytes;  # accumulator for hex bytes
+
   # read the next line of BT iBeacon data
-  chomp( my $data = <BT> );
+  while (my $data = <$BT>) {
+    chomp $data;
 
-  # if this data starts with a '>' that indicates the beginning of a new message
-  # thus, this is our indication to process the previous message
-  if ( $data =~ s/^$time_regex >// && defined $bytes ) {
+    # if this data starts with a '>' that indicates the beginning of a new message
+    # thus, this is our indication to process the previous message
+    if ( $data =~ s/^$time_regex >// && defined $bytes ) {
 
-    # don't call mktime here to avoid creating timestamps for non-tilt iBeacons
-    # this helps speed up the calls since this method is being triggered very rapidly
-    my ($yr, $mon, $day, $hr, $min, $sec, $usec) = ($1, $2, $3, $4, $5, $6, $7);
+      # Enqueue a hash reference with the collected data
+      # don't call mktime here to avoid creating timestamps for non-tilt iBeacons
+      # this helps speed up the calls since this method is being triggered very rapidly
+      $btQueue->enqueue({
+        yr    => $1,
+        mon   => $2,
+        day   => $3,
+        hr    => $4,
+        min   => $5,
+        sec   => $6,
+        usec  => $7,
+        'bytes' => $bytes,
+      });
 
+      undef $bytes;  # reset byte stream
+    }
+
+    # if this looks like hex bytes add it to the data stream
+    if ( $data =~ /^\s+([[:xdigit:]]{2}\s+?)+$/ ) {
+      $data =~ s/\s+//g;  # remove whitespace
+      $bytes .= $data;
+    }
+  }
+
+  close $BT;
+}
+
+
+sub processBeacon {
+
+  # process all messages currently in the queue
+  while ( my $msg = $btQueue->dequeue_nb() ) {
+
+    my $bytes = $msg->{'bytes'};
+
+    # see if this message belongs to a Tilt device
     if ( $bytes =~ s/.*$id_regex// ) {
       my $name = $names[$1];
 
+      # add a new Tilt display if one doesn’t already exist
       addTilt($name) unless ( exists $disp{$name} );
 
-      my $time = mktime( $sec, $min, $hr, $day, $mon - 1, $yr - 1900 ) + $usec / 1e6;
+      # create a timestamp
+      my $time = mktime( $msg->{sec},
+                         $msg->{min},
+                         $msg->{hr},
+                         $msg->{day},
+                         $msg->{mon} - 1,
+                         $msg->{yr} - 1900 ) + $msg->{usec} / 1e6;
+
+      # process the beacon data
       updateTilt($name, $time, $bytes);
     }
-
-    undef $bytes;  # reset byte stream
-  }
-
-  # if this looks like hex bytes add it to the data stream
-  if ( $data =~ /^\s+([[:xdigit:]]{2}\s+?)+$/ ) {
-    $data =~ s/\s+//g;  # remove whitespace
-    $bytes .= $data;
   }
 }
 
@@ -776,7 +823,12 @@ sub resetMenu {
 
 
 sub quit {
-  kill 'HUP', $child if ($child);
+
+  # if we need to signal the thread to exit, might have to
+  # implement a termination mechanism (for example, enqueue a special message)?
+  # for now, simply detach it
+  $bt_thread->detach() if $bt_thread;
+
   writeOpts();
   exit 0;
 }
