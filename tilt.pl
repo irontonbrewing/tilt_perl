@@ -11,6 +11,8 @@
 #                       minor bug fixes
 # 1.1        02/01/25   Move bluetooth packet reading to separate thread
 #                       Better dynamic dimensioning of GUI/widgets
+#                       Debug and beacon data logs
+#                       Verbose switch at command line
 #
 # File: tilt.pl
 # Purpose: Read low energy bluetooth iBeacon data from Tilt hydrometer devices.
@@ -32,6 +34,7 @@ no warnings 'experimental::smartmatch';
 use POSIX qw/mktime strftime/;
 use Time::HiRes qw/time/;
 use LWP::UserAgent;
+use Getopt::Long;
 
 use Tk;
 use Tk::PNG;
@@ -40,14 +43,21 @@ use Tk::JPEG;
 use threads;
 use Thread::Queue;
 
-# turn on level 1 or 2 debug for troubleshooting
-my $DEBUG = 0;
-
 # GLOBALS
 my ( %disp, %log, %cal, $logo, $tinyFont, $smallFont, $largeFont );
+my ( $dbgWindow, $dbgScrolled, @dbgHistory,  );
+my ( $beaconWindow, $beaconScrolled, @beaconHistory );
+
+# default setting to auto-scroll the debug/beacon logs
+my $dbgAutoScroll = 1;
+my $beaconAutoScroll = 1;
+
+# determine verbose mode
+my $VERBOSE = 0;
+GetOptions( 'v|verbose+' => \$VERBOSE );
 
 # the time in seconds with no updates from a Tilt before declaring it OFF and removing it from the program
-my $TIMEOUT = 10;
+my $TIMEOUT = 120;
 
 # the UUID to match in an iBeacon packet for Tilt devices
 my $id_regex = qr{A495BB([1-8])0C5B14B44B5121370F02D74DE};
@@ -91,7 +101,7 @@ loadOpts();
 # start the BT scanning in a separate thread
 my $bt_thread = threads->create( \&readBeacon );
 
-# poll our the BT queue every 50ms
+# poll the BT queue every 50ms
 $mw->repeat( 50, \&processBeacon );
 
 # check for the last recieved signal every half second
@@ -179,6 +189,8 @@ sub processBeacon {
                          $msg->{day},
                          $msg->{mon} - 1,
                          $msg->{yr} - 1900 ) + $msg->{usec} / 1e6;
+
+      warn "Could not create timestamp for $name beacon" unless ( defined $time );
 
       # process the beacon data
       updateTilt($name, $time, $bytes);
@@ -281,7 +293,7 @@ sub addTilt {
   my $row = int( (scalar keys %disp) / 3 );
   my $col = (scalar keys %disp) - $row * 3;
 
-  printf( "Adding %s Tilt in row $row col $col\n", uc($name) ) if ($DEBUG);
+  dbgLog( sprintf( "Adding %s Tilt in row $row, col $col", uc($name) ) );
   $frame->grid( -row => $row, -column => $col );
 
   # update the menu options for this new color
@@ -338,12 +350,10 @@ sub updateTilt {
     push @{ $log{$name}{'data'} }, { 'time' => $time, 'sg' => $sg, 'temp' => $temp, 'rssi' => $rssi };
   }
 
-  if ($DEBUG > 2) {
-    printf "%s Tilt @ %s\n", uc($name), strftime( "%D %r", localtime($time) );
-    print "\tSG = $sg\n\ttemp = $temp degF\n\tRSSI = $rssi dBm";
-    print "\n\tBattery is $batt weeks old" if ($batt);
-    print "\n\n";
-  }
+  my $beacon = sprintf( "%s Tilt beacon\n", uc($name) );
+  $beacon .= "\tSG = $sg\n\ttemp = $temp degF\n\tRSSI = $rssi dBm";
+  $beacon .= "\n\tBattery is $batt weeks old" if ($batt);
+  beaconLog($beacon);
 }
 
 
@@ -372,7 +382,7 @@ sub deleteTilt {
 
   return unless ( exists $disp{$name} );
 
-  printf( "Deleting %s Tilt\n", uc($name) ) if ($DEBUG);
+  dbgLog( sprintf( "Deleting %s Tilt", uc($name) ) );
 
   $disp{$name}->{'frame'}->DESTROY;
   delete $disp{$name};
@@ -392,7 +402,7 @@ sub shiftLeft {
     my $row = int( $num / 3 );
     my $col = $num - $row * 3;
 
-    printf( "Shifting %s Tilt to row $row col $col\n", uc($name) ) if ($DEBUG);
+    dbgLog( sprintf( "Shifting %s Tilt to row $row, col $col", uc($name) ) );
 
     my $frame = $disp{$name}->{'frame'};
     $frame->gridForget;
@@ -438,7 +448,7 @@ sub loadOpts {
   my $name_regex = join "|", @names;
   $name_regex = qr{--($name_regex)}i;
 
-  print "\nLoading configuration options:\n" if ($DEBUG > 1);
+  dbgLog('Loading configuration options');
 
   while ( my $line = <INI> ) {
     chomp($line);
@@ -453,39 +463,38 @@ sub loadOpts {
     }
 
     unless ( defined $name && $name ~~ @names ) {
-      print "Error: invalid Tilt color '$name' for config options\n";
+      dbgLog("Error: invalid Tilt color '$name' for config options");
       next;
     }
 
     my ($opt, $value) = split /[;,=|]/, $line, 2;
 
     if ( $opt =~ /url/i ) {
-      print "\tsetting $name log URL = $value\n" if ($DEBUG > 1);
+      dbgLog( "setting $name log URL = $value" );
       $log{$name}{'url'} = $value;
 
     } elsif ( $opt =~ /beer|name/i ) {
-      print "\tsetting $name log beer = $value\n" if ($DEBUG > 1);
+      dbgLog( "setting $name log beer = $value" );
       $log{$name}{'beer'} = $value;
 
     } elsif ( $opt =~ /time|int(erval)|period/i ) {
-      print "\tsetting $name log interval = $value\n" if ($DEBUG > 1);
+      dbgLog( "setting $name log interval = $value" );
       $log{$name}{'interval'} = $value;
 
     } elsif ( $opt =~ /sg/i ) {
-      print "\tsetting $name cal SG = $value\n" if ($DEBUG > 1);
+      dbgLog( "setting $name cal SG = $value" );
       $cal{$name}{'sg'} = $value;
 
     } elsif ( $opt =~ /temp/i ) {
-      print "\tsetting $name cal temp = $value\n" if ($DEBUG > 1);
+      dbgLog( "setting $name cal temp = $value" );
       $cal{$name}{'temp'} = $value;
 
     } else {
-      print "Error: invalid option '$opt' for $name Tilt!\n";
+      dbgLog( "Error: invalid option '$opt' for $name Tilt!" );
     }
   }
 
   close INI;
-  print "\n" if ($DEBUG > 1);
 }
 
 
@@ -519,7 +528,7 @@ sub writeOpts {
 
 
 sub searching {
-  printf( "Adding %s Tilt in row 0 col 0\n", uc( $names[0] ) ) if ($DEBUG);
+  dbgLog( sprintf( "Adding %s Tilt in row 0, col 0", uc( $names[0] ) ) );
 
   my $frame = $mw->Frame( -bg => $bg,
                           -relief => 'groove',
@@ -591,6 +600,25 @@ sub buildMenus {
       }
     }
   }
+
+  my $log_menu = $menu->cascade( -label => 'Log', -tearoff => 0 );
+  my $dbg_menu = $log_menu->cascade( -label => 'Debug', -tearoff => 0 );
+  my $beacon_menu = $log_menu->cascade( -label => 'Beacon Data', -tearoff => 0 );
+
+  $dbg_menu->command( -label => 'Show Debug Log',  -command => [ \&showLog, 'debug' ] );
+  $beacon_menu->command( -label => 'Show Beacon Log', -command => [ \&showLog, 'beacon' ] );
+
+  $dbg_menu->command( -label => 'Clear Debug Log', -command =>
+    sub {
+          @dbgHistory = ();
+          $dbgScrolled->delete('1.0', 'end') if (defined $dbgScrolled);
+        });
+
+  $beacon_menu->command( -label => 'Clear Beacon Log', -command =>
+    sub {
+          @beaconHistory = ();
+          $beaconScrolled->delete('1.0', 'end') if (defined $beaconScrolled);
+        });
 }
 
 
@@ -688,7 +716,7 @@ sub logPoint {
   # then no "new" data has been collected for this log point
   # theoretically, this should only happen when first starting a log
   if ( $data[-1]->{'time'} < $last_logged ) {
-    print "No new data, not logging\n" if ($DEBUG);
+    dbgLog( 'No new data, not logging' );
     return 0;
   }
 
@@ -721,21 +749,21 @@ sub logPoint {
   # first, add this data point to the internal log so we can export it later
   push @{ $log{$name}{'csv'} }, $body;
 
-  if ($DEBUG) {
-    printf( "Attempting to POST data point\n" .
-           "\tTime: %s\n" .
-           "\tAverage of $num_data points\n" .
-           "\tHTML body: $body\n\n", strftime( "%D %r", localtime($time) ) );
-  }
+  my $dbg = sprintf(
+            "Attempting to POST data point\n" .
+            "\tTime: %s\n" .
+            "\tAverage of $num_data points\n" .
+            "\tHTML body: $body\n\n", strftime( "%D %r", localtime($time) ) );
+  dbgLog($dbg);
 
   my $lwp = LWP::UserAgent->new;
   my $resp = $lwp->request($req);
 
   unless ( $resp->is_success ) {
-    printf( "Error logging data: %s\n", $resp->status_line );
+    dbgLog( sprintf( "Error logging data: %s", $resp->status_line ) );
 
-  } elsif ($DEBUG) {
-    printf( "LOG SUCCESS: %s\n", $resp->status_line );
+  } else {
+    dbgLog( sprintf( "LOG SUCCESS: %s", $resp->status_line ) );
   }
 }
 
@@ -822,6 +850,114 @@ sub exportData {
   }
 
   close CSV;
+}
+
+
+#===============================================
+# Debug/interal log methods
+#===============================================
+
+sub showLog {
+  my $type = shift || 'debug';
+
+  my $window = $type eq 'debug' ? \$dbgWindow : \$beaconWindow;
+
+  # if already open, just deiconify and raise it
+  if (defined $$window) {
+    $$window->deiconify;
+    $$window->raise;
+    return;
+  }
+
+  # Create a new top-level window for debug messages
+  $$window = $mw->Toplevel;
+  $window = $$window;  # de-reference
+  $window->title( uc($type) . ' LOG' );
+
+  # set a minimum size
+  $window->minsize(500, 300);
+
+  my $scrolled = $type eq 'debug' ? \$dbgScrolled : \$beaconScrolled;
+  my $auto = $type eq 'debug' ? \$dbgAutoScroll : \$beaconAutoScroll;
+
+  # add a button to hide the debug window
+  my $subFrame = $window->Frame()->pack( -side => 'top', -fill => 'x' );
+  $subFrame->Button(
+    -text    => 'Close',
+    -command => sub { $window->withdraw; $$auto = 1 }
+  )->pack( -side => 'right' );
+
+  # checkbox to auto-scroll the debug log
+  my $autoScroll = $subFrame->Checkbutton(
+    -text => 'Auto scroll',
+    -variable => $auto,
+  )->pack( -side => 'left', -padx => 3 );
+
+  # create scrolled text widget
+  $$scrolled = $window->Scrolled('Text',
+    -width      => 80,
+    -height     => 20,
+    -wrap       => 'word',
+    -background => 'black',
+    -foreground => 'white',
+    -scrollbars => 'se',
+    -font => $smallFont
+  )->pack( -side => 'bottom', -fill => 'both', -expand => 1 );
+
+  # load the entire log history into the text widget
+  my $history = $type eq 'debug' ? \@dbgHistory : \@beaconHistory;
+  my $join = $type eq 'debug' ? "\n" : "\n\n";
+
+  $scrolled = $$scrolled;  # de-reference
+  $scrolled->delete('1.0', 'end');  # clear any existing text
+  $scrolled->insert( 'end', join( $join, @$history) );
+  $scrolled->insert( 'end', $join );  # skip one more line(s)
+  $scrolled->see('end');
+
+  # configure the auto-scroll checkbutton to jump to the end, if turning on auto-scroll
+  $autoScroll->configure( -command =>
+  sub {
+    if ( ${ $autoScroll->cget(-variable) } == 1 ) {
+      $scrolled->see('end');
+    }
+  });
+}
+
+
+sub beaconLog {
+  LOG(shift, 'beacon');
+}
+
+
+sub dbgLog {
+  LOG(shift, 'debug');
+}
+
+
+sub LOG {
+  my $msg = shift;
+  my $type = shift || 'debug';
+
+  my $tn = strftime( "%D %r", localtime(time) );
+  my $line = "[$tn]  $msg";
+
+  my $scrolled = $type eq 'debug' ? $dbgScrolled : $beaconScrolled;
+  my $auto = $type eq 'debug' ? $dbgAutoScroll : $beaconAutoScroll;
+  my $hist = $type eq 'debug' ? \@dbgHistory : \@beaconHistory;
+
+  # append to the Tk debug text widget if it exists
+  if (defined $scrolled) {
+    $scrolled->insert( 'end', "$line\n" );
+    $scrolled->insert( 'end', "\n" ) if ( $type eq 'beacon' );
+    $scrolled->see('end') if ($auto);
+  }
+
+  # add this line to the debug history
+  push @$hist, $line;
+
+  # also print to STDOUT if running in verbose mode
+  print "$line\n" if ( $VERBOSE && $type eq 'debug' );
+  print "$line\n\n" if ( $VERBOSE > 1 && $type eq 'beacon' );
 }
 
 
