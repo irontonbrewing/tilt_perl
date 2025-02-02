@@ -10,6 +10,7 @@
 #                       packPropagate to resize window as devices are added/removed
 #                       minor bug fixes
 # 1.1        02/01/25   Move bluetooth packet reading to separate thread
+#                       Better dynamic dimensioning of GUI/widgets
 #
 # File: tilt.pl
 # Purpose: Read low energy bluetooth iBeacon data from Tilt hydrometer devices.
@@ -46,7 +47,7 @@ my $DEBUG = 0;
 my ( %disp, %log, %cal, $logo, $tinyFont, $smallFont, $largeFont );
 
 # the time in seconds with no updates from a Tilt before declaring it OFF and removing it from the program
-my $TIMEOUT = 120;
+my $TIMEOUT = 10;
 
 # the UUID to match in an iBeacon packet for Tilt devices
 my $id_regex = qr{A495BB([1-8])0C5B14B44B5121370F02D74DE};
@@ -88,10 +89,10 @@ initGUI();
 loadOpts();
 
 # start the BT scanning in a separate thread
-my $bt_thread = threads->create(\&readBeacon);
+my $bt_thread = threads->create( \&readBeacon );
 
 # poll our the BT queue every 50ms
-$mw->repeat(50, \&processBeacon);
+$mw->repeat( 50, \&processBeacon );
 
 # check for the last recieved signal every half second
 $mw->repeat( 500, \&lastHeard );
@@ -285,6 +286,9 @@ sub addTilt {
 
   # update the menu options for this new color
   buildMenus();
+
+  # force the GUI to resize to accommodate the new Tilt
+  sizeGUI();
 }
 
 
@@ -394,14 +398,15 @@ sub shiftLeft {
     $frame->gridForget;
     $frame->grid( -row => $row, -column => $col );
   }
+
+  # force the GUI to resize to accommodate the remaining Tilts
+  sizeGUI();
 }
 
 
 sub initGUI {
   $mw->protocol( 'WM_DELETE_WINDOW', \&quit );
   $SIG{INT} = \&quit;
-
-  $mw->packPropagate(1);
 
   # load the Tilt logo
   $logo = $mw->Photo( -file => './tilt_logo.png' );
@@ -414,6 +419,13 @@ sub initGUI {
 
   buildMenus();
   searching();
+}
+
+
+sub sizeGUI {
+  # resize the GUI to accommodate the current widgets
+  $mw->update;
+  $mw->geometry( $mw->reqwidth . 'x' . $mw->reqheight );
 }
 
 
@@ -539,6 +551,7 @@ sub searching {
                  -fg => $fg )->pack( -side => 'top' );
 
   lastHeard();
+  sizeGUI();
 }
 
 
