@@ -13,7 +13,7 @@
 #                       Better dynamic dimensioning of GUI/widgets
 #                       Event and beacon data logs
 #                       Verbose switch at command line
-#                       Log status on Tilt display
+#                       Log state on Tilt display
 #
 # File: tilt.pl
 # Purpose: Read low energy bluetooth iBeacon data from Tilt hydrometer devices.
@@ -59,6 +59,13 @@ GetOptions( 'v|verbose+' => \$VERBOSE );
 
 # the time in seconds with no updates from a Tilt before declaring it OFF and removing it from the program
 my $TIMEOUT = 120;
+
+# default to minimum log interval
+my $MIN_LOG_TIME = 15;  # minutes
+my $MAX_LOG_TIME = 60;
+
+# periodic logger, to be started later
+my $logger;
 
 # the UUID to match in an iBeacon packet for Tilt devices
 my $id_regex = qr{A495BB([1-8])0C5B14B44B5121370F02D74DE};
@@ -107,13 +114,6 @@ $mw->repeat( 50, \&processBeacon );
 
 # check for the last recieved signal every half second
 $mw->repeat( 500, \&lastHeard );
-
-# default to minimum log interval
-my $MIN_LOG_TIME = 15;  # minutes
-my $MAX_LOG_TIME = 60;
-
-# periodic logger, to be started later
-my $logger;
 
 # start the Tk loop
 MainLoop;
@@ -218,7 +218,7 @@ sub addTilt {
                           -relief => 'groove',
                           -borderwidth => 3 );
 
-  my ( $delta, $time, $timestamp, $sg, $sg_raw, $temp, $temp_raw, $rssi, $log_status );
+  my ( $delta, $time, $timestamp, $sg, $sg_raw, $temp, $temp_raw, $rssi, $log_state );
   $disp{$name} = { 'frame' => $frame,
                    'delta' => \$delta,
                    'timestamp' => \$timestamp,
@@ -230,7 +230,7 @@ sub addTilt {
                    'temp_raw' => \$temp_raw,
                    'temp_label' => \my $temp_label,
                    'rssi'     => \$rssi,
-                   'log_status' => \$log_status };
+                   'log_state' => \$log_state };
 
   my %entryOpts = (
     -state => 'readonly',
@@ -293,11 +293,11 @@ sub addTilt {
 
   # indicator for logging status
   $frame->Entry( -font => $tinyFont,
-                 -textvariable => \$log_status,
+                 -textvariable => \$log_state,
                  -borderwidth => 0,
                  %entryOpts )->pack(%packOpts);
 
-  logStatus($name);  # update the log status on initialization
+  logState($name);  # update the log state on initialization
 
   # add the entire Tilt display box into the geometry manager last
   # this guarantees it will "see" the required room for the above widgets
@@ -349,9 +349,9 @@ sub updateTilt {
   ${ $disp{$name}->{'sg'}        } = sprintf( $is_pro ? "%.04f" : "%.03f", $sg );
   ${ $disp{$name}->{'sg_raw'}    } = $sg_raw;
 
-  ${ $disp{$name}->{'temp_label'}  } = 'Temperature: ' . $temp_raw . "\x{B0}F (uncal)";
-  ${ $disp{$name}->{'temp'}        } = $temp . "\x{B0}F";
-  ${ $disp{$name}->{'temp_raw'}    } = $temp_raw;
+  ${ $disp{$name}->{'temp_label'} } = 'Temperature: ' . $temp_raw . "\x{B0}F (uncal)";
+  ${ $disp{$name}->{'temp'}       } = $temp . "\x{B0}F";
+  ${ $disp{$name}->{'temp_raw'}   } = $temp_raw;
 
   ${ $disp{$name}->{'timestamp'} } = strftime( "%D %r", localtime($time) );
   ${ $disp{$name}->{'time'}      } = $time;
@@ -666,7 +666,7 @@ sub startLog {
   $log{$name}{'timer'} = $mw->repeat( $interval, [ \&logPoint, $name ] );
 
   logPoint($name);
-  logStatus($name);
+  logState($name);
 }
 
 
@@ -694,13 +694,23 @@ sub stopLog {
   my $name = shift;
   $log{$name}{'timer'}->cancel;
   $log{$name}{'timer'} = undef;
-  logStatus($name);
+  logState($name);
 }
 
 
-sub logStatus {
+sub logState {
   my $name = shift;
-  ${ $disp{$name}->{'log_status'} } = 'Logging: ' . ( defined $log{$name}{'timer'} ? 'ACTIVE' : 'INACTIVE' );
+  my $state = defined $log{$name}{'timer'} ? 'ACTIVE' : 'INACTIVE';
+  ${ $disp{$name}->{'log_state'} } = "Logging: $state";
+
+  my $status = sprintf( "%s Tilt logging is now $state", uc($name) );
+
+  if ( $state eq 'ACTIVE' ) {
+    $status .= sprintf( "\n\tinterval: %d", $log{$name}{'interval'} );
+    $status .= sprintf( "\n\tURL: %s", $log{$name}{'url'} );
+  }
+
+  eventLog($status);
 }
 
 
@@ -773,7 +783,7 @@ sub logPoint {
     eventLog( sprintf( "Error logging data: %s", $resp->status_line ) );
 
   } else {
-    eventLog( sprintf( "LOG SUCCESS: %s", $resp->status_line ) );
+    eventLog( sprintf( "Log success: %s", $resp->status_line ) );
   }
 }
 
