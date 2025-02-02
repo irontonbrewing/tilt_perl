@@ -9,10 +9,11 @@
 # 1.01       04/30/24   Use Tilt logo as window icon
 #                       packPropagate to resize window as devices are added/removed
 #                       minor bug fixes
-# 1.1        02/01/25   Move bluetooth packet reading to separate thread
+# 1.1        02/02/25   Move bluetooth packet reading to separate thread
 #                       Better dynamic dimensioning of GUI/widgets
 #                       Event and beacon data logs
 #                       Verbose switch at command line
+#                       Log status on Tilt display
 #
 # File: tilt.pl
 # Purpose: Read low energy bluetooth iBeacon data from Tilt hydrometer devices.
@@ -107,10 +108,12 @@ $mw->repeat( 50, \&processBeacon );
 # check for the last recieved signal every half second
 $mw->repeat( 500, \&lastHeard );
 
+# default to minimum log interval
+my $MIN_LOG_TIME = 15;  # minutes
+my $MAX_LOG_TIME = 60;
+
 # periodic logger, to be started later
 my $logger;
-$log{'green'}{'timer'} = $mw->repeat( 15 * 60 * 1000, [ \&logPoint, 'green' ] );
-
 
 # start the Tk loop
 MainLoop;
@@ -215,7 +218,7 @@ sub addTilt {
                           -relief => 'groove',
                           -borderwidth => 3 );
 
-  my ( $delta, $time, $timestamp, $sg, $sg_raw, $temp, $temp_raw, $rssi );
+  my ( $delta, $time, $timestamp, $sg, $sg_raw, $temp, $temp_raw, $rssi, $log_status );
   $disp{$name} = { 'frame' => $frame,
                    'delta' => \$delta,
                    'timestamp' => \$timestamp,
@@ -226,7 +229,8 @@ sub addTilt {
                    'temp'     => \$temp,
                    'temp_raw' => \$temp_raw,
                    'temp_label' => \my $temp_label,
-                   'rssi'     => \$rssi };
+                   'rssi'     => \$rssi,
+                   'log_status' => \$log_status };
 
   my %entryOpts = (
     -state => 'readonly',
@@ -286,6 +290,14 @@ sub addTilt {
                  -textvariable => \$rssi,
                  -borderwidth => 0,
                  %entryOpts )->pack(%packOpts);
+
+  # indicator for logging status
+  $frame->Entry( -font => $tinyFont,
+                 -textvariable => \$log_status,
+                 -borderwidth => 0,
+                 %entryOpts )->pack(%packOpts);
+
+  logStatus($name);  # update the log status on initialization
 
   # add the entire Tilt display box into the geometry manager last
   # this guarantees it will "see" the required room for the above widgets
@@ -616,7 +628,7 @@ sub logging {
   resetMenu($menu);
 
   $menu->command( -label => sprintf( "Setup Log (%s)", defined $log{$name}{'timer'} ? 'ACTIVE' : 'INACTIVE' ), -command => [ \&setupLog, $name ] );
-  $menu->command( -label => 'Stop Log',  -command => [ \&stopLog,  $name ] );
+  $menu->command( -label => 'Stop Log', -command => [ \&stopLog,  $name ] );
 }
 
 
@@ -650,7 +662,9 @@ sub startLog {
 
   my $interval = $log{$name}{'interval'} * 60 * 1000;
   $log{$name}{'timer'} = $mw->repeat( $interval, [ \&logPoint, $name ] );
+
   logPoint($name);
+  logStatus($name);
 }
 
 
@@ -659,10 +673,12 @@ sub validateInterval {
 
   my $int = $log{$name}{'interval'};
 
-  if ( $int < 15 || $int > 60 ) {
+  if ( $int < $MIN_LOG_TIME || $int > $MAX_LOG_TIME ) {
     foreach my $w ( $log_frame->gridSlaves ) {
       if ( $w->isa('Tk::Label') && $w->cget(-text) =~ /status|error|warn/i ) {
-        $w->configure( -text => 'Error: Log interval must be between 15-60 minutes!' );
+        $w->configure( -text => "Error: Log interval must be between $MIN_LOG_TIME-$MAX_LOG_TIME minutes!",
+                       -background => 'red',
+                       -foreground => 'white' );
         return 0;
       }
     }
@@ -676,6 +692,13 @@ sub stopLog {
   my $name = shift;
   $log{$name}{'timer'}->cancel;
   $log{$name}{'timer'} = undef;
+  logStatus($name);
+}
+
+
+sub logStatus {
+  my $name = shift;
+  ${ $disp{$name}->{'log_status'} } = 'Logging: ' . ( defined $log{$name}{'timer'} ? 'ACTIVE' : 'INACTIVE' );
 }
 
 
