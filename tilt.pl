@@ -45,7 +45,7 @@ use threads;
 use Thread::Queue;
 
 # GLOBALS
-my ( %disp, %log, %cal, $logo, $tinyFont, $smallFont, $largeFont );
+my ( %disp, %log, %cal, $logo, $tinyFont, $smallFont, $largeFont, $logFont );
 my ( $eventWindow, $eventScrolled, @eventHistory,  );
 my ( $beaconWindow, $beaconScrolled );
 
@@ -83,7 +83,7 @@ my @names = qw(
   pink
 );
 
-# general background and font colors
+# general background colors
 my $bg = 'gray25';
 my $fg = 'snow1';
 
@@ -297,8 +297,6 @@ sub addTilt {
                  -borderwidth => 0,
                  %entryOpts )->pack(%packOpts);
 
-  logState($name);  # update the log state on initialization
-
   # add the entire Tilt display box into the geometry manager last
   # this guarantees it will "see" the required room for the above widgets
   # determine the row/column to create a 3x3 grid (maximum)
@@ -307,6 +305,8 @@ sub addTilt {
 
   eventLog( sprintf( "Adding %s Tilt in row $row, col $col", uc($name) ) );
   $frame->grid( -row => $row, -column => $col );
+
+  logState($name);  # update the log state on initialization
 
   # update the menu options for this new color
   buildMenus();
@@ -362,9 +362,12 @@ sub updateTilt {
     push @{ $log{$name}{'data'} }, { 'time' => $time, 'sg' => $sg, 'temp' => $temp, 'rssi' => $rssi };
   }
 
-  my $beacon = sprintf( "%s Tilt beacon\n", uc($name) );
-  $beacon .= "\tSG = $sg\n\ttemp = $temp degF\n\tRSSI = $rssi dBm";
-  $beacon .= "\n\tBattery is $batt weeks old" if ($batt);
+  my $beacon = sprintf( "%s Tilt beacon", uc($name) );
+  $beacon .= "\nSG: $sg";
+  $beacon .= "\nTemp: $temp degF";
+  $beacon .= "\nRSSI: $rssi dBm";
+  $beacon .= "\nBattery: $batt weeks old" if ($batt);
+  $beacon .= "\nRaw data: $bytes";
   beaconLog($beacon);
 }
 
@@ -440,6 +443,7 @@ sub initGUI {
   $tinyFont  = $mw->fontCreate( 'tiny',  -family => 'Courier',   -size => 9,  -weight => 'bold' );
   $smallFont = $mw->fontCreate( 'small', -family => 'Helvetica', -size => 12 );
   $largeFont = $mw->fontCreate( 'large', -family => 'Helvetica', -size => 40, -weight => 'bold' );
+  $logFont   = $mw->fontCreate( 'log',   -family => 'Courier',   -size => 12 );
 
   buildMenus();
   searching();
@@ -482,29 +486,30 @@ sub loadOpts {
     }
 
     my ($opt, $value) = split /[;,=|]/, $line, 2;
+    my $nm = uc($name) . ' Tilt';
 
     if ( $opt =~ /url/i ) {
-      eventLog( "\tsetting $name log URL = $value" );
+      eventLog( "$nm: setting log URL\n$value" );
       $log{$name}{'url'} = $value;
 
     } elsif ( $opt =~ /beer|name/i ) {
-      eventLog( "\tsetting $name log beer = $value" );
+      eventLog( "$nm: setting log beer name\n'$value'" );
       $log{$name}{'beer'} = $value;
 
     } elsif ( $opt =~ /time|int(erval)|period/i ) {
-      eventLog( "\tsetting $name log interval = $value" );
+      eventLog( "$nm: setting log interval = $value min" );
       $log{$name}{'interval'} = $value;
 
     } elsif ( $opt =~ /sg/i ) {
-      eventLog( "\tsetting $name cal SG = $value" );
+      eventLog( "$nm: setting cal SG = $value" );
       $cal{$name}{'sg'} = $value;
 
     } elsif ( $opt =~ /temp/i ) {
-      eventLog( "\tsetting $name cal temp = $value" );
+      eventLog( "$nm: setting cal temp = $value" );
       $cal{$name}{'temp'} = $value;
 
     } else {
-      eventLog( "Error: invalid option '$opt' for $name Tilt!" );
+      eventLog( "Error: invalid option '$opt' for $nm!" );
     }
   }
 
@@ -770,10 +775,10 @@ sub logPoint {
   push @{ $log{$name}{'csv'} }, $body;
 
   my $event = sprintf(
-            "Attempting to POST data point\n" .
-            "\tTime: %s\n" .
-            "\tAverage of $num_data points\n" .
-            "\tHTML body: $body\n\n", strftime( "%D %r", localtime($time) ) );
+            "Attempting to POST data point" .
+            "\n\tTime: %s" .
+            "\n\tAverage of $num_data points" .
+            "\n\tHTML body: $body\n\n", strftime( "%D %r", localtime($time) ) );
   eventLog($event);
 
   my $lwp = LWP::UserAgent->new;
@@ -924,7 +929,7 @@ sub showLog {
     -background => 'black',
     -foreground => 'white',
     -scrollbars => 'se',
-    -font => $smallFont
+    -font => $logFont
   )->pack( -side => 'bottom', -fill => 'both', -expand => 1 );
 
   $scrolled = $$scrolled;  # de-reference
@@ -969,11 +974,20 @@ sub eventLog {
 
 
 sub LOG {
-  my $msg = shift;
+  my $message = shift;
   my $type = shift || 'event';
 
   my $tn = strftime( "%D %r", localtime(time) );
-  my $line = "[$tn]  $msg";
+
+  my @msg = split /\n/, $message;
+  my $msg = shift @msg;
+
+  my $line = "[$tn] $msg";
+  my $spacer = ' ' x ( length($line) - length($msg) );
+
+  foreach my $m (@msg) {
+    $line .= "\n" . $spacer . $m;
+  }
 
   my $scrolled = $type eq 'event' ? $eventScrolled : $beaconScrolled;
   my $auto = $type eq 'event' ? $eventAutoScroll : $beaconAutoScroll;
@@ -986,6 +1000,7 @@ sub LOG {
       $scrolled->see('end') if ($auto);
     }
   }
+
 
   # add this line to the event history
   # don't keep history of beacons; too excessive
