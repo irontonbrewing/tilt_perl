@@ -451,9 +451,11 @@ sub initGUI {
 
 
 sub sizeGUI {
+  my $w = shift || $mw;
+
   # resize the GUI to accommodate the current widgets
-  $mw->update;
-  $mw->geometry( $mw->reqwidth . 'x' . $mw->reqheight );
+  $w->update;
+  $w->geometry( $w->reqwidth . 'x' . $w->reqheight );
 }
 
 
@@ -684,8 +686,8 @@ sub validateInterval {
     foreach my $w ( $log_frame->gridSlaves ) {
       if ( $w->isa('Tk::Label') && $w->cget(-text) =~ /status|error|warn/i ) {
         $w->configure( -text => "Error: Log interval must be between $MIN_LOG_TIME-$MAX_LOG_TIME minutes!",
-                       -background => 'red',
-                       -foreground => 'white' );
+                       -bg => 'red',
+                       -fg => $fg );
         return 0;
       }
     }
@@ -811,21 +813,50 @@ sub calibrateWater {
   my $name = shift;
   my $sg_raw = ${ $disp{$name}{'sg_raw'} };
   $cal{$name}{'sg'} = ($sg_raw - 1) * -1;
+
+  my $log = sprintf( "%s Tilt: water SG calibration complete", uc($name) );
+  $log .= sprintf( "\nSG offset: %.3f", $cal{$name}{'sg'} );
+  eventLog($log);
+
 }
 
 
 sub calibrateManual {
   my ($name, $type) = @_;
 
-  my $cal_frame = $mw->Toplevel( -title => sprintf( "%s manual %s calibration", uc($name), uc($type) ) );
+  my $cal_frame = $mw->Toplevel( -title => uc($type) );
+
+  $cal_frame->Label( -text => sprintf( "%s manual %s calibration", uc($name), uc($type) ),
+                     -relief => 'groove',
+                     -borderwidth => 2,
+                     -bg => $colors{$name},
+                     -fg => $fg )->
+    grid( -row => 0, -column => 0, -sticky => 'we', -columnspan => 2 );
 
   my $new_cal = $cal{$name}{$type};
 
-  $cal_frame->Label( -text => sprintf( "%s offset: ", uc($type) ) )->grid( -row => 0, -column => 0, -sticky => 'e' );
-  $cal_frame->Entry( -textvariable => \$new_cal )->grid( -row => 0, -column => 1 );
+  $cal_frame->Label( -text => sprintf( "%s offset: ", uc($type) ) )->grid( -row => 1, -column => 0, -sticky => 'w' );
+  $cal_frame->Entry( -textvariable => \$new_cal )->grid( -row => 1, -column => 1, -sticky => 'e' );
 
-  $cal_frame->Button( -text => 'OK', -command => sub { $cal{$name}{$type} = $new_cal; $cal_frame->DESTROY } )->grid( -row => 1, -column => 0, -sticky => 'w' );
-  $cal_frame->Button( -text => 'CANCEL', -command => sub { $cal_frame->DESTROY } )->grid( -row => 1, -column => 1, -sticky => 'e' );
+  my $ok_button = $cal_frame->Button( -text => 'OK' )->grid( -row => 2, -column => 0, -sticky => 'w' );
+  $cal_frame->Button( -text => 'CANCEL', -command => sub { $cal_frame->DESTROY } )->grid( -row => 2, -column => 1, -sticky => 'e' );
+
+  $ok_button->configure( -command =>
+    sub {
+      $cal{$name}{$type} = $new_cal;
+      $cal_frame->DESTROY;
+      my $log = sprintf( "%s Tilt: manual %s calibration complete", uc($name), uc($type) );
+      $log .= sprintf( "\n%s offset: %s", uc($type), $new_cal || 'NONE' );
+      eventLog($log);
+    });
+
+  # make the cal window appear over the Tilt display which is being affected
+  $cal_frame->geometry( sprintf( "+%d+%d",
+                          $disp{$name}->{'frame'}->rootx + 50,
+                          $disp{$name}->{'frame'}->rooty + 50 ) );
+
+  $cal_frame->attributes( -topmost => 1 );  # always on top
+  sizeGUI($cal_frame);  # re-size the cal widget
 }
 
 
@@ -923,11 +954,11 @@ sub showLog {
 
   # create scrolled text widget
   $$scrolled = $window->Scrolled('Text',
-    -width      => 80,
-    -height     => 20,
-    -wrap       => 'word',
-    -background => 'black',
-    -foreground => 'white',
+    -width  => 80,
+    -height => 20,
+    -wrap => 'word',
+    -bg => 'black',
+    -fg => 'white',
     -scrollbars => 'se',
     -font => $logFont
   )->pack( -side => 'bottom', -fill => 'both', -expand => 1 );
