@@ -35,6 +35,7 @@ no warnings 'experimental::smartmatch';
 use POSIX qw/mktime strftime/;
 use Time::HiRes qw/time/;
 use LWP::UserAgent;
+use URI;
 use Getopt::Long;
 
 use Tk;
@@ -644,27 +645,61 @@ sub logging {
 sub setupLog {
   my $name = shift;
 
-  my $log_frame = $mw->Toplevel( -title => sprintf( "%s Tilt log setup", uc($name) ) );
+  my $log_frame = $mw->Toplevel( -title => 'Log setup' );
 
-  $log_frame->Label( -text => 'URL: ' )->grid( -row => 0, -column => 0, -sticky => 'e' );
-  $log_frame->Entry( -textvariable => \$log{$name}{'url'} )->grid( -row => 0, -column => 1 );
+  my $r = 0;
+  my $width =  30;
 
-  $log_frame->Label( -text => 'Interval: ' )->grid( -row => 1, -column => 0, -sticky => 'e' );
-  $log_frame->Entry( -textvariable => \$log{$name}{'interval'} )->grid( -row => 1, -column => 1 );
+  $log_frame->Label( -text => sprintf( "%s Tilt log setup", uc($name) ),
+                     -relief => 'groove',
+                     -borderwidth => 2,
+                     -bg => $colors{$name},
+                     -fg => $fg )->
+    grid( -row => $r, -column => 0, -sticky => 'we', -columnspan => 2 );
 
-  $log_frame->Label( -text => 'Beer name: ' )->grid( -row => 2, -column => 0, -sticky => 'e' );
-  $log_frame->Entry( -textvariable => \$log{$name}{'beer'} )->grid( -row => 2, -column => 1 );
+  $log_frame->Button( -text => 'URL:',
+                      -relief => 'flat',
+                      -overrelief => 'raised',
+                      -command => sub { undef $log{$name}{'url'} } )->grid( -row => ++$r, -column => 0, -sticky => 'e' );
+  $log_frame->Entry( -textvariable => \$log{$name}{'url'}, -width => $width )->grid( -row => $r, -column => 1, -sticky => 'w' );
 
-  $log_frame->Button( -text => 'START',  -command => [ \&startLog, $log_frame, $name ] )->grid( -row => 3, -column => 0, -sticky => 'w' );
-  $log_frame->Button( -text => 'CANCEL', -command => sub { $log_frame->DESTROY } )->grid( -row => 3, -column => 1, -sticky => 'e' );
+  # force the log interval to be the minimum allowed, if none is yet defined
+  $log{$name}{'interval'} = $MIN_LOG_TIME unless ( defined $log{$name}{'interval'} || length( $log{$name}{'interval'} ) );
 
-  $log_frame->Label( -text => 'Status: ' )->grid( -row => 4, -column => 0, -columnspan => 2, -sticky => 'w' );
+  $log_frame->Button( -text => 'Interval (min):',
+                      -relief => 'flat',
+                      -overrelief => 'raised',
+                      -command => sub { undef $log{$name}{'interval'} } )->grid( -row => ++$r, -column => 0, -sticky => 'e' );
+  $log_frame->Entry( -textvariable => \$log{$name}{'interval'}, -width => $width )->grid( -row => $r, -column => 1, -sticky => 'w' );
+
+  $log_frame->Button( -text => 'Beer name:',
+                      -relief => 'flat',
+                      -overrelief => 'raised',
+                      -command => sub { undef $log{$name}{'beer'} } )->grid( -row => ++$r, -column => 0, -sticky => 'e' );
+  $log_frame->Entry( -textvariable => \$log{$name}{'beer'}, -width => $width )->grid( -row => $r, -column => 1, -sticky => 'w' );
+
+  $log_frame->Button( -text => 'START LOG', -command => [ \&startLog, $log_frame, $name ] )->grid( -row => ++$r, -column => 0, -sticky => 'w' );
+  $log_frame->Button( -text => 'CANCEL', -command => sub { $log_frame->DESTROY } )->grid( -row => $r, -column => 1, -sticky => 'e' );
+
+  $log_frame->Label( -text => 'Status: ',
+                     -relief => 'groove',
+                     -anchor => 'w',
+                     -borderwidth => 2 )->grid( -row => ++$r, -column => 0, -columnspan => 2, -sticky => 'ew' );
+
+  # make the log window appear over the Tilt display which is being affected
+  $log_frame->geometry( sprintf( "+%d+%d",
+                          $disp{$name}->{'frame'}->rootx + 2,
+                          $disp{$name}->{'frame'}->rooty + 2 ) );
+
+  $log_frame->attributes( -topmost => 1 );  # always on top
+  sizeGUI($log_frame);  # re-size the log widget
 }
 
 
 sub startLog {
   my ($log_frame, $name) = @_;
 
+  return unless validateURL(@_);
   return unless validateInterval(@_);
 
   $log_frame->DESTROY;
@@ -677,20 +712,72 @@ sub startLog {
 }
 
 
+sub validateURL {
+  my ($log_frame, $name) = @_;
+
+  my $url = $log{$name}{'url'};
+
+  # find the Tk::Label to provide warnings
+  my $warn;
+  foreach my $w ( $log_frame->gridSlaves ) {
+    $warn = $w if ( $w->isa('Tk::Label') && $w->cget(-text) =~ /status|error|warn/i );
+    last;
+  }
+
+  # check that a URL was provided at all
+  unless ( defined $url || length($url) ) {
+    $warn->configure( -text => 'Error: must provide log URL!',
+                      -bg => 'red',
+                      -fg => $fg );
+    return 0;
+  }
+
+  # check that the URL is valid
+  my $uri = URI->new($url);
+
+  # check that the URI object was created, has a host, and has http/https scheme
+  unless ( defined $uri && $uri->scheme && $uri->host &&
+           ($uri->scheme eq 'http' || $uri->scheme eq 'https') ) {
+
+    $warn->configure( -text => 'Error: invalid log URL!',
+                      -bg => 'red',
+                      -fg => $fg );
+    return 0;
+  }
+
+  return 1;
+}
+
+
 sub validateInterval {
   my ($log_frame, $name) = @_;
 
   my $int = $log{$name}{'interval'};
 
-  if ( $int < $MIN_LOG_TIME || $int > $MAX_LOG_TIME ) {
-    foreach my $w ( $log_frame->gridSlaves ) {
-      if ( $w->isa('Tk::Label') && $w->cget(-text) =~ /status|error|warn/i ) {
-        $w->configure( -text => "Error: Log interval must be between $MIN_LOG_TIME-$MAX_LOG_TIME minutes!",
-                       -bg => 'red',
-                       -fg => $fg );
-        return 0;
-      }
-    }
+  # find the Tk::Label to provide warnings
+  my $warn;
+  foreach my $w ( $log_frame->gridSlaves ) {
+    $warn = $w if ( $w->isa('Tk::Label') && $w->cget(-text) =~ /status|error|warn/i );
+    last;
+  }
+
+  # check that an interval was provided at all
+  unless ( defined $int || length($int) ) {
+    $warn->configure( -text => 'Error: must provide log interval (15-60min)!',
+                      -bg => 'red',
+                      -fg => $fg );
+
+    $log{$name}{'interval'} = $MIN_LOG_TIME;
+    return 0;
+  }
+
+  if ( $int !~ /^\d+$/ || $int < $MIN_LOG_TIME || $int > $MAX_LOG_TIME ) {
+    $warn->configure( -text => "Error: Log interval must be between $MIN_LOG_TIME-$MAX_LOG_TIME minutes!",
+                      -bg => 'red',
+                      -fg => $fg );
+
+    $log{$name}{'interval'} = $MIN_LOG_TIME;
+    return 0;
   }
 
   return 1;
@@ -699,6 +786,7 @@ sub validateInterval {
 
 sub stopLog {
   my $name = shift;
+  return unless ( defined $log{$name}{'timer'} );
   $log{$name}{'timer'}->cancel;
   $log{$name}{'timer'} = undef;
   logState($name);
