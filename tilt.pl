@@ -623,7 +623,7 @@ sub buildMenus {
     }
   }
 
-  my $log_menu = $menu->cascade( -label => 'Log', -tearoff => 0 );
+  my $log_menu = $menu->cascade( -label => 'Status', -tearoff => 0 );
   $log_menu->command( -label => 'Show Event Log',   -command => [ \&showLog, 'event'  ] );
   $log_menu->command( -label => 'Show Beacon Data', -command => [ \&showLog, 'beacon' ] );
 }
@@ -801,8 +801,8 @@ sub logState {
   my $status = sprintf( "%s Tilt logging is now $state", uc($name) );
 
   if ( $state eq 'ACTIVE' ) {
-    $status .= sprintf( "\n\tinterval: %d", $log{$name}{'interval'} );
-    $status .= sprintf( "\n\tURL: %s", $log{$name}{'url'} );
+    $status .= sprintf( "\ninterval: %d", $log{$name}{'interval'} );
+    $status .= sprintf( "\nURL: %s", $log{$name}{'url'} );
   }
 
   eventLog($status);
@@ -864,11 +864,11 @@ sub logPoint {
   # first, add this data point to the internal log so we can export it later
   push @{ $log{$name}{'csv'} }, $body;
 
-  my $event = sprintf(
-            "Attempting to POST data point" .
-            "\n\tTime: %s" .
-            "\n\tAverage of $num_data points" .
-            "\n\tHTML body: $body\n\n", strftime( "%D %r", localtime($time) ) );
+  my @body = split /&/, $body;
+  my $event = 'Attempting to POST data point';
+    $event .= "\nAverage of $num_data points";
+    $event .= "\nHTML body:";
+    $event .= "\n  " . join "&\n  ", @body;
   eventLog($event);
 
   my $lwp = LWP::UserAgent->new;
@@ -1019,7 +1019,10 @@ sub showLog {
   $window->title( uc($type) . ' LOG' );
 
   # set a minimum size
-  $window->minsize(500, 300);
+  my $minw = $type eq 'event' ? 800 : 550;
+  my $minh = 400;
+  $window->minsize($minw, $minh);
+  $window->geometry( sprintf( "%dx%d+%d+%d", $minw, $minh, $mw->rootx + 50, $mw->rooty + 50 ) );
 
   my $scrolled = $type eq 'event' ? \$eventScrolled : \$beaconScrolled;
   my $auto = $type eq 'event' ? \$eventAutoScroll : \$beaconAutoScroll;
