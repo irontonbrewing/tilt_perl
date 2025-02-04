@@ -33,7 +33,6 @@ use strict;
 use warnings;
 no warnings 'experimental::smartmatch';
 
-use Carp;
 use POSIX qw/mktime strftime/;
 use Time::HiRes qw/time/;
 use Getopt::Long;
@@ -611,7 +610,7 @@ sub buildMenus {
   foreach my $m ($export, $cal, $log) {
     my $label = $m->cget(-label);
     my $cmd = $label =~ /export/i ? \&exportData :
-              $label =~ /cal/i    ? \&calibrate  : \&logging;
+              $label =~ /cal/i    ? \&calibrate  : \&setupLog;
 
     foreach my $name (keys %disp) {
       my $color = $colors{$name};
@@ -624,12 +623,12 @@ sub buildMenus {
         -activeforeground => $fg
       );
 
-      if ( $label =~ /export/i ) {
-        $m->command( -command => [ $cmd, $name ], %menuOpts );
-
-      } else {
+      if ( $label =~ /cal/i ) {
         my $m2 = $m->cascade( %menuOpts, -tearoff => 0 );
         $m2->cget(-menu)->configure( -postcommand => [ $cmd, $m2, $name ] );
+
+      } else {
+        $m->command( -command => [ $cmd, $name ], %menuOpts );
       }
     }
   }
@@ -644,22 +643,12 @@ sub buildMenus {
 # Logging methods
 #===============================================
 
-sub logging {
-  my ($menu, $name) = @_;
-  resetMenu($menu);
-
-  $menu->command( -label => sprintf( "Setup Log (%s)", defined $log{$name}{'timer'} ? 'ACTIVE' : 'INACTIVE' ), -command => [ \&setupLog, $name ] );
-  $menu->command( -label => 'Stop Log', -command => [ \&stopLog,  $name ] );
-}
-
-
 sub setupLog {
   my $name = shift;
 
   my $log_frame = $mw->Toplevel( -title => 'Log setup' );
 
   my $r = 0;
-  my $width = 30;
 
   $log_frame->Label( -text => sprintf( "%s Tilt log setup", uc($name) ),
                      -relief => 'groove',
@@ -668,44 +657,90 @@ sub setupLog {
                      -fg => $fg )->
     grid( -row => $r, -column => 0, -sticky => 'we', -columnspan => 2 );
 
+  my @entries;
+  my %entryOpts = (
+    -width => 30,
+    -state => defined $log{$name}{'timer'} ? 'readonly' : 'normal',
+    -readonlybackground => 'gray70' 
+  );
+
+  my @buttons;
+  my %buttonOpts = (
+    -relief => 'flat',
+    -state => defined $log{$name}{'timer'} ? 'disabled' : 'normal',
+    -overrelief => 'raised'
+  );
+
   # log endpoint URL
-  $log_frame->Button( -text => 'URL:',
-                      -relief => 'flat',
-                      -overrelief => 'raised',
-                      -command => sub { undef $log{$name}{'url'} } )->grid( -row => ++$r, -column => 0, -sticky => 'e' );
-  $log_frame->Entry( -textvariable => \$log{$name}{'url'}, -width => $width )->grid( -row => $r, -column => 1, -sticky => 'w' );
+  push @buttons,
+    $log_frame->Button( %buttonOpts,
+                        -text => 'URL:',
+                        -command => sub { undef $log{$name}{'url'} } )->grid( -row => ++$r, -column => 0, -sticky => 'e' );
+
+  push @entries,
+    $log_frame->Entry( %entryOpts,
+                       -textvariable => \$log{$name}{'url'} )->grid( -row => $r, -column => 1, -sticky => 'w' );
 
   # force the log interval to be the minimum allowed, if none is yet defined
   $log{$name}{'interval'} = $MIN_LOG_TIME unless ( defined $log{$name}{'interval'} || length( $log{$name}{'interval'} ) );
 
   # log interval time
-  $log_frame->Button( -text => 'Interval (min):',
-                      -relief => 'flat',
-                      -overrelief => 'raised',
-                      -command => sub { undef $log{$name}{'interval'} } )->grid( -row => ++$r, -column => 0, -sticky => 'e' );
-  $log_frame->Entry( -textvariable => \$log{$name}{'interval'}, -width => $width )->grid( -row => $r, -column => 1, -sticky => 'w' );
+  push @buttons,
+    $log_frame->Button( %buttonOpts,
+                        -text => 'Interval (min):',
+                        -command => sub { undef $log{$name}{'interval'} } )->grid( -row => ++$r, -column => 0, -sticky => 'e' );
+
+  push @entries,
+    $log_frame->Entry( %entryOpts,
+                       -textvariable => \$log{$name}{'interval'}, )->grid( -row => $r, -column => 1, -sticky => 'w' );
 
   # beer name
-  $log_frame->Button( -text => 'Beer name:',
-                      -relief => 'flat',
-                      -overrelief => 'raised',
-                      -command => sub { undef $log{$name}{'beer'} } )->grid( -row => ++$r, -column => 0, -sticky => 'e' );
-  $log_frame->Entry( -textvariable => \$log{$name}{'beer'}, -width => $width )->grid( -row => $r, -column => 1, -sticky => 'w' );
+  push @buttons,
+    $log_frame->Button( %buttonOpts,
+                        -text => 'Beer name:',
+                        -command => sub { undef $log{$name}{'beer'} } )->grid( -row => ++$r, -column => 0, -sticky => 'e' );
+
+  push @entries,
+    $log_frame->Entry( %entryOpts,
+                       -textvariable => \$log{$name}{'beer'} )->grid( -row => $r, -column => 1, -sticky => 'w' );
 
   # email (for Google sheets)
-  $log_frame->Button( -text => 'email:',
-                      -relief => 'flat',
-                      -overrelief => 'raised',
-                      -command => sub { undef $log{$name}{'email'} } )->grid( -row => ++$r, -column => 0, -sticky => 'e' );
-  $log_frame->Entry( -textvariable => \$log{$name}{'email'}, -width => $width )->grid( -row => $r, -column => 1, -sticky => 'w' );
+  push @buttons,
+    $log_frame->Button( %buttonOpts,
+                        -text => 'email:',
+                        -command => sub { undef $log{$name}{'email'} } )->grid( -row => ++$r, -column => 0, -sticky => 'e' );
 
-  $log_frame->Button( -text => 'START LOG', -command => [ \&startLog, $log_frame, $name ] )->grid( -row => ++$r, -column => 0, -sticky => 'w' );
+  push @entries,
+    $log_frame->Entry( %entryOpts,
+                       -textvariable => \$log{$name}{'email'} )->grid( -row => $r, -column => 1, -sticky => 'w' );
+
+  my $action = defined $log{$name}{'timer'} ? 'STOP' : 'START';
+  my $start_stop = $log_frame->Button( -text => "$action LOG")->grid( -row => ++$r, -column => 0, -sticky => 'w' );
   $log_frame->Button( -text => 'CLOSE', -command => sub { $log_frame->DESTROY } )->grid( -row => $r, -column => 1, -sticky => 'e' );
 
-  $log_frame->Label( -text => 'Status: ',
-                     -relief => 'groove',
-                     -anchor => 'w',
-                     -borderwidth => 2 )->grid( -row => ++$r, -column => 0, -columnspan => 2, -sticky => 'ew' );
+  my $status_label = $log_frame->Label( -text => 'Status: ',
+                                        -relief => 'groove',
+                                        -anchor => 'w',
+                                        -borderwidth => 2 )->grid( -row => ++$r, -column => 0, -columnspan => 2, -sticky => 'ew' );
+
+  # configure start/stop button
+  $start_stop->configure( -command =>
+    sub {
+      if ( defined $log{$name}{'timer'} ) {
+        if ( stopLog($name) ) {
+          $start_stop->configure( -text => 'START LOG' );
+          map { $_->configure( -state => 'normal' ) } ( @entries, @buttons );
+        }
+
+      } else {
+        if ( startLog($name, $status_label) ) {
+          $start_stop->configure( -text => 'STOP LOG' );
+          map { $_->configure( -state => 'readonly' ) } @entries;
+          map { $_->configure( -state => 'disabled' ) } @buttons;
+        }
+      }
+  } );
+
 
   # make the log window appear over the Tilt display which is being affected
   $log_frame->geometry( sprintf( "+%d+%d",
@@ -718,14 +753,7 @@ sub setupLog {
 
 
 sub startLog {
-  my ($log_frame, $name) = @_;
-
-  # find the Tk::Label to provide status
-  my $status;
-  foreach my $w ( $log_frame->gridSlaves ) {
-    $status = $w if ( $w->isa('Tk::Label') && $w->cget(-text) =~ /status|error|warn/i );
-    last;
-  }
+  my ( $name, $status ) = @_;
 
   return unless validateLogArgs($status, $name);
   $status->configure( -bg => $bg, -fg => $fg, -text => 'Starting log, standby...' );
@@ -734,15 +762,13 @@ sub startLog {
     $status->configure( -bg => 'red', -fg => $fg, -text => 'Error starting log: see event log!' );
 
   } else {
-    $status->configure( -bg => 'green', -fg => $fg, -text => 'Log started' );
+    $status->configure( -bg => 'OliveDrab', -fg => $fg, -text => 'Log started' );
     
     my $interval = $log{$name}{'interval'} * 60 * 1000;
     $log{$name}{'timer'} = $mw->repeat( $interval, [ \&logPoint, $name ] );
     logState($name);
 
-    foreach my $w ( $log_frame->gridSlaves ) {
-      $w->configure( -state => 'disabled' ) if ( $w->isa('Tk::Entry') );
-    }
+    return 1;
   }
 }
 
@@ -763,17 +789,17 @@ sub validateLogArgs {
     my $data = $log{$name}{$field};
 
     # check that data was provided at all
-    unless ( defined $data || length($data) ) {
+    unless ( defined $data && $data ne '' ) {
       $warn->configure( -bg => 'red', -fg => $fg, -text => "Error: must provide log $field!" );
       $log{$name}{'interval'} = $MIN_LOG_TIME if ( $field eq 'interval' );
       return;
     }
 
     next unless ( defined $check{$field} );
-    eval { $check{$field}->($data, $name) };
+    my $err = $check{$field}->($data, $name);
 
-    if ($@) {
-      $warn->configure( -bg => 'red', -fg => $fg, -text => "Error: $@!" );
+    if ( defined $err && $err ne '' ) {
+      $warn->configure( -bg => 'red', -fg => $fg, -text => "Error: $err!" );
       return;
     }
   }
@@ -791,8 +817,10 @@ sub validateURL {
   # check that the URI object was created, has a host, and has http/https scheme
   unless ( defined $uri && $uri->scheme && $uri->host &&
            ($uri->scheme eq 'http' || $uri->scheme eq 'https') ) {
-    croak 'Error: invalid log URL!';
+    return 'invalid log URL';
   }
+
+  return;
 }
 
 
@@ -801,8 +829,10 @@ sub validateInterval {
 
   if ( $int !~ /^\d+$/ || $int < $MIN_LOG_TIME || $int > $MAX_LOG_TIME ) {
     $log{$name}{'interval'} = $MIN_LOG_TIME;
-    croak "Error: Log interval must be between $MIN_LOG_TIME-$MAX_LOG_TIME minutes!";
+    return "log interval must be between $MIN_LOG_TIME - $MAX_LOG_TIME minutes";
   }
+
+  return;
 }
 
 
@@ -814,7 +844,8 @@ sub validateEmail {
   # this is copied from https://emailregex.com, is RFC 5322 compliant, and works 99.99% of the time (apparently)
   my $regex = qr{(?:[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*|"(?:[\x01-\x08\x0b\x0c\x0e-\x1f\x21\x23-\x5b\x5d-\x7f]|\\[\x01-\x09\x0b\x0c\x0e-\x7f])*")@(?:(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?|\[(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?|[a-z0-9-]*[a-z0-9]:(?:[\x01-\x08\x0b\x0c\x0e-\x1f\x21-\x5a\x53-\x7f]|\\[\x01-\x09\x0b\x0c\x0e-\x7f])+)\])};
 
-  croak 'Error: invalid email address!' unless ( $email =~ $regex );
+  return 'invalid email address' unless ( $email =~ $regex );
+  return;
 }
 
 
@@ -824,6 +855,7 @@ sub stopLog {
   $log{$name}{'timer'}->cancel;
   $log{$name}{'timer'} = undef;
   logState($name);
+  return 1;
 }
 
 
@@ -907,7 +939,7 @@ sub logPoint {
 
   # for Google sheets. swap out the RSSI for email address on the first log point
   # this is the indication to Google to create a new log sheet
-  if ($init) {
+  if ( $init && $log{$name}{'url'} =~ /google/i ) {
     $body =~ s/(Comment=).*$/$1$log{$name}{'email'}/;
   }
 
@@ -933,7 +965,9 @@ sub sendPoint {
   my $ua = LWP::UserAgent->new;
   $ua->requests_redirectable( ['GET', 'HEAD', 'POST'] );  # required for Google sheets HTTPS redirects
 
+  $mw->Busy( -recurse => 1 );
   my $resp = $ua->request($req);
+  $mw->Unbusy;
 
   # unsuccessful POST
   unless ( $resp->is_success ) {
