@@ -53,6 +53,15 @@ sudo cpan App::cpanminus
 # note this will also install a LOT of dependencies (but good ones!)
 sudo cpanm LWP::UserAgent
 
+# for Google Sheets, must have HTTPS support for LWP::UserAgent
+# this requires the OpenSSL dev and zlib dev packages
+sudo apt-get install libssl-dev
+sudo apt-get install zlib1g-dev
+sudo cpanm LWP::Protocol::https
+
+# Google Sheets operates with JSON (good to have anyway)
+sudo cpanm JSON
+
 # if you want to run hcitool and hcidump as a normal user, grant the appropriate capabilities to the executables
 # then remove the 'sudo' calls in the perl script
 # note this may have security implications

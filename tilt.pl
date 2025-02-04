@@ -9,7 +9,8 @@
 # 1.01       04/30/24   Use Tilt logo as window icon
 #                       packPropagate to resize window as devices are added/removed
 #                       minor bug fixes
-# 1.1        02/02/25   Move bluetooth packet reading to separate thread
+# 1.1        02/03/25   Move bluetooth packet reading to separate thread
+#                       Google sheets support
 #                       Better dynamic dimensioning of GUI/widgets
 #                       Event and beacon data logs
 #                       Verbose switch at command line
@@ -32,11 +33,13 @@ use strict;
 use warnings;
 no warnings 'experimental::smartmatch';
 
+use Carp;
 use POSIX qw/mktime strftime/;
 use Time::HiRes qw/time/;
+use Getopt::Long;
 use LWP::UserAgent;
 use URI;
-use Getopt::Long;
+use JSON;
 
 use Tk;
 use Tk::PNG;
@@ -88,7 +91,7 @@ my @names = qw(
 my $bg = 'gray25';
 my $fg = 'snow1';
 
-# actual shades of color for the color color names
+# actual shades of color for the color names
 # default to the color itself, and override any shades below
 # right now, only green needs to be changed?
 my %colors;
@@ -219,7 +222,7 @@ sub addTilt {
                           -relief => 'groove',
                           -borderwidth => 3 );
 
-  my ( $delta, $time, $timestamp, $sg, $sg_raw, $temp, $temp_raw, $rssi, $log_state );
+  my ( $delta, $time, $timestamp, $sg, $sg_raw, $temp, $temp_raw, $rssi_label, $log_state );
   $disp{$name} = { 'frame' => $frame,
                    'delta' => \$delta,
                    'timestamp' => \$timestamp,
@@ -230,8 +233,10 @@ sub addTilt {
                    'temp'     => \$temp,
                    'temp_raw' => \$temp_raw,
                    'temp_label' => \my $temp_label,
-                   'rssi'     => \$rssi,
-                   'log_state' => \$log_state };
+                   'temp_val'   => \my $temp_val,
+                   'rssi_label' => \$rssi_label,
+                   'rssi'       => \my $rssi,
+                   'log_state'  => \$log_state };
 
   my %entryOpts = (
     -state => 'readonly',
@@ -288,7 +293,7 @@ sub addTilt {
 
   # Received signal strength indicator (RSSI) display
   $frame->Entry( -font => $tinyFont,
-                 -textvariable => \$rssi,
+                 -textvariable => \$rssi_label,
                  -borderwidth => 0,
                  %entryOpts )->pack(%packOpts);
 
@@ -353,10 +358,12 @@ sub updateTilt {
   ${ $disp{$name}->{'temp_label'} } = 'Temperature: ' . $temp_raw . "\x{B0}F (uncal)";
   ${ $disp{$name}->{'temp'}       } = $temp . "\x{B0}F";
   ${ $disp{$name}->{'temp_raw'}   } = $temp_raw;
+  ${ $disp{$name}->{'temp_val'}   } = $temp;
 
   ${ $disp{$name}->{'timestamp'} } = strftime( "%D %r", localtime($time) );
   ${ $disp{$name}->{'time'}      } = $time;
-  ${ $disp{$name}->{'rssi'}      } = 'Signal: ' . $rssi . ' dBm';
+  ${ $disp{$name}->{'rssi_label'} } = 'Signal: ' . $rssi . ' dBm';
+  ${ $disp{$name}->{'rssi'} } = $rssi;
 
   # add this data to the log data
   if ( defined $log{$name}{'timer'} ) {
@@ -364,11 +371,11 @@ sub updateTilt {
   }
 
   my $beacon = sprintf( "%s Tilt beacon", uc($name) );
-  $beacon .= "\nSG: $sg";
-  $beacon .= "\nTemp: $temp degF";
-  $beacon .= "\nRSSI: $rssi dBm";
-  $beacon .= "\nBattery: $batt weeks old" if ($batt);
-  $beacon .= "\nRaw data: $bytes";
+    $beacon .= "\nSG: $sg";
+    $beacon .= "\nTemp: $temp degF";
+    $beacon .= "\nRSSI: $rssi dBm";
+    $beacon .= "\nBattery: $batt weeks old" if ($batt);
+    $beacon .= "\nRaw data: $bytes";
   beaconLog($beacon);
 }
 
@@ -511,6 +518,10 @@ sub loadOpts {
       eventLog( "$nm: setting cal temp = $value" );
       $cal{$name}{'temp'} = $value;
 
+    } elsif ( $opt =~ /email/i ) {
+      eventLog( "$nm: setting email = $value" );
+      $log{$name}{'email'} = $value;
+
     } else {
       eventLog( "Error: invalid option '$opt' for $nm!" );
     }
@@ -532,7 +543,7 @@ sub writeOpts {
   foreach my $name (keys %opt_names) {
     printf INI "--%s\n", uc($name);
 
-    foreach my $key (qw/url beer interval/) {
+    foreach my $key (qw/url beer interval email/) {
       next unless ( defined $log{$name}{$key} );
       print INI "$key=$log{$name}{$key}\n";
     }
@@ -648,7 +659,7 @@ sub setupLog {
   my $log_frame = $mw->Toplevel( -title => 'Log setup' );
 
   my $r = 0;
-  my $width =  30;
+  my $width = 30;
 
   $log_frame->Label( -text => sprintf( "%s Tilt log setup", uc($name) ),
                      -relief => 'groove',
@@ -657,6 +668,7 @@ sub setupLog {
                      -fg => $fg )->
     grid( -row => $r, -column => 0, -sticky => 'we', -columnspan => 2 );
 
+  # log endpoint URL
   $log_frame->Button( -text => 'URL:',
                       -relief => 'flat',
                       -overrelief => 'raised',
@@ -666,20 +678,29 @@ sub setupLog {
   # force the log interval to be the minimum allowed, if none is yet defined
   $log{$name}{'interval'} = $MIN_LOG_TIME unless ( defined $log{$name}{'interval'} || length( $log{$name}{'interval'} ) );
 
+  # log interval time
   $log_frame->Button( -text => 'Interval (min):',
                       -relief => 'flat',
                       -overrelief => 'raised',
                       -command => sub { undef $log{$name}{'interval'} } )->grid( -row => ++$r, -column => 0, -sticky => 'e' );
   $log_frame->Entry( -textvariable => \$log{$name}{'interval'}, -width => $width )->grid( -row => $r, -column => 1, -sticky => 'w' );
 
+  # beer name
   $log_frame->Button( -text => 'Beer name:',
                       -relief => 'flat',
                       -overrelief => 'raised',
                       -command => sub { undef $log{$name}{'beer'} } )->grid( -row => ++$r, -column => 0, -sticky => 'e' );
   $log_frame->Entry( -textvariable => \$log{$name}{'beer'}, -width => $width )->grid( -row => $r, -column => 1, -sticky => 'w' );
 
+  # email (for Google sheets)
+  $log_frame->Button( -text => 'email:',
+                      -relief => 'flat',
+                      -overrelief => 'raised',
+                      -command => sub { undef $log{$name}{'email'} } )->grid( -row => ++$r, -column => 0, -sticky => 'e' );
+  $log_frame->Entry( -textvariable => \$log{$name}{'email'}, -width => $width )->grid( -row => $r, -column => 1, -sticky => 'w' );
+
   $log_frame->Button( -text => 'START LOG', -command => [ \&startLog, $log_frame, $name ] )->grid( -row => ++$r, -column => 0, -sticky => 'w' );
-  $log_frame->Button( -text => 'CANCEL', -command => sub { $log_frame->DESTROY } )->grid( -row => $r, -column => 1, -sticky => 'e' );
+  $log_frame->Button( -text => 'CLOSE', -command => sub { $log_frame->DESTROY } )->grid( -row => $r, -column => 1, -sticky => 'e' );
 
   $log_frame->Label( -text => 'Status: ',
                      -relief => 'groove',
@@ -699,38 +720,70 @@ sub setupLog {
 sub startLog {
   my ($log_frame, $name) = @_;
 
-  return unless validateURL(@_);
-  return unless validateInterval(@_);
+  # find the Tk::Label to provide status
+  my $status;
+  foreach my $w ( $log_frame->gridSlaves ) {
+    $status = $w if ( $w->isa('Tk::Label') && $w->cget(-text) =~ /status|error|warn/i );
+    last;
+  }
 
-  $log_frame->DESTROY;
+  return unless validateLogArgs($status, $name);
+  $status->configure( -bg => $bg, -fg => $fg, -text => 'Starting log, standby...' );
 
-  my $interval = $log{$name}{'interval'} * 60 * 1000;
-  $log{$name}{'timer'} = $mw->repeat( $interval, [ \&logPoint, $name ] );
+  unless ( logPoint($name, 'INIT') ) {
+    $status->configure( -bg => 'red', -fg => $fg, -text => 'Error starting log: see event log!' );
 
-  logPoint($name);
-  logState($name);
+  } else {
+    $status->configure( -bg => 'green', -fg => $fg, -text => 'Log started' );
+    
+    my $interval = $log{$name}{'interval'} * 60 * 1000;
+    $log{$name}{'timer'} = $mw->repeat( $interval, [ \&logPoint, $name ] );
+    logState($name);
+
+    foreach my $w ( $log_frame->gridSlaves ) {
+      $w->configure( -state => 'disabled' ) if ( $w->isa('Tk::Entry') );
+    }
+  }
+}
+
+
+sub validateLogArgs {
+  my ($warn, $name) = @_;
+
+  my %check = (
+    'url' => \&validateURL,
+    'interval' => \&validateInterval,
+    'beer' => undef,
+    'email' => \&validateEmail
+  );
+
+  delete $check{'email'} unless ( defined $log{$name}{'url'} && $log{$name}{'url'} =~ /google/i );
+
+  foreach my $field (keys %check) {
+    my $data = $log{$name}{$field};
+
+    # check that data was provided at all
+    unless ( defined $data || length($data) ) {
+      $warn->configure( -bg => 'red', -fg => $fg, -text => "Error: must provide log $field!" );
+      $log{$name}{'interval'} = $MIN_LOG_TIME if ( $field eq 'interval' );
+      return;
+    }
+
+    next unless ( defined $check{$field} );
+    eval { $check{$field}->($data, $name) };
+
+    if ($@) {
+      $warn->configure( -bg => 'red', -fg => $fg, -text => "Error: $@!" );
+      return;
+    }
+  }
+
+  return 1;
 }
 
 
 sub validateURL {
-  my ($log_frame, $name) = @_;
-
-  my $url = $log{$name}{'url'};
-
-  # find the Tk::Label to provide warnings
-  my $warn;
-  foreach my $w ( $log_frame->gridSlaves ) {
-    $warn = $w if ( $w->isa('Tk::Label') && $w->cget(-text) =~ /status|error|warn/i );
-    last;
-  }
-
-  # check that a URL was provided at all
-  unless ( defined $url || length($url) ) {
-    $warn->configure( -text => 'Error: must provide log URL!',
-                      -bg => 'red',
-                      -fg => $fg );
-    return 0;
-  }
+  my $url = shift;
 
   # check that the URL is valid
   my $uri = URI->new($url);
@@ -738,49 +791,30 @@ sub validateURL {
   # check that the URI object was created, has a host, and has http/https scheme
   unless ( defined $uri && $uri->scheme && $uri->host &&
            ($uri->scheme eq 'http' || $uri->scheme eq 'https') ) {
-
-    $warn->configure( -text => 'Error: invalid log URL!',
-                      -bg => 'red',
-                      -fg => $fg );
-    return 0;
+    croak 'Error: invalid log URL!';
   }
-
-  return 1;
 }
 
 
 sub validateInterval {
-  my ($log_frame, $name) = @_;
-
-  my $int = $log{$name}{'interval'};
-
-  # find the Tk::Label to provide warnings
-  my $warn;
-  foreach my $w ( $log_frame->gridSlaves ) {
-    $warn = $w if ( $w->isa('Tk::Label') && $w->cget(-text) =~ /status|error|warn/i );
-    last;
-  }
-
-  # check that an interval was provided at all
-  unless ( defined $int || length($int) ) {
-    $warn->configure( -text => 'Error: must provide log interval (15-60min)!',
-                      -bg => 'red',
-                      -fg => $fg );
-
-    $log{$name}{'interval'} = $MIN_LOG_TIME;
-    return 0;
-  }
+  my ( $int, $name ) = @_;
 
   if ( $int !~ /^\d+$/ || $int < $MIN_LOG_TIME || $int > $MAX_LOG_TIME ) {
-    $warn->configure( -text => "Error: Log interval must be between $MIN_LOG_TIME-$MAX_LOG_TIME minutes!",
-                      -bg => 'red',
-                      -fg => $fg );
-
     $log{$name}{'interval'} = $MIN_LOG_TIME;
-    return 0;
+    croak "Error: Log interval must be between $MIN_LOG_TIME-$MAX_LOG_TIME minutes!";
   }
+}
 
-  return 1;
+
+sub validateEmail {
+  my ( $email, $name ) = @_;
+  return unless ( $log{$name}{'url'} =~ /google/i );  # email only required for Google sheets
+
+  # mostly I just wanted an excuse to use this ridiculous email regular expression, because hey, it's fun!
+  # this is copied from https://emailregex.com, is RFC 5322 compliant, and works 99.99% of the time (apparently)
+  my $regex = qr{(?:[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*|"(?:[\x01-\x08\x0b\x0c\x0e-\x1f\x21\x23-\x5b\x5d-\x7f]|\\[\x01-\x09\x0b\x0c\x0e-\x7f])*")@(?:(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?|\[(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?|[a-z0-9-]*[a-z0-9]:(?:[\x01-\x08\x0b\x0c\x0e-\x1f\x21-\x5a\x53-\x7f]|\\[\x01-\x09\x0b\x0c\x0e-\x7f])+)\])};
+
+  croak 'Error: invalid email address!' unless ( $email =~ $regex );
 }
 
 
@@ -810,29 +844,38 @@ sub logState {
 
 
 sub logPoint {
-  my $name = shift;
-  my $url = $log{$name}{'url'};
-
-  my $req = HTTP::Request->new( 'POST', $url );
-  $req->header( 'Content-Type' => 'application/x-www-form-urlencoded; charset=utf-8' );
+  my ( $name, $init ) = @_;
 
   # get current time and convert to Excel time (1990 epoch)
   my $time = time;
   my $log_time = ($time / 86400) + 25569;
-  my $last_logged = $log{$name}{'last_logged'} || $time;
+  my $last_logged = $log{$name}{'last_logged'} || 0;
   $log{$name}{'last_logged'} = $time;
 
-  return 0 unless ( defined $log{$name}{'data'} );
+  # on log initialization, log a point immediately so we can see that things work
+  if ($init) {
+    push @{ $log{$name}{'data'} }, {
+      'time' => $time,
+      'sg'   => ${ $disp{$name}->{'sg'}   },
+      'temp' => ${ $disp{$name}->{'temp_val'} },
+      'rssi' => ${ $disp{$name}->{'rssi'} }
+    };
+  }
+
+  unless ( defined $log{$name}{'data'} && scalar @{ $log{$name}{'data'} } ) {
+    eventLog( sprintf( "%s Tilt: no data found, not logging!", uc($name) ) );
+    return;
+  }
+
+  # grab this interval's dataset
   my @data = @{ $log{$name}{'data'} };
   my $num_data = scalar @data;
-  return 0 unless $num_data;
 
   # if the last data point is prior to the time of the last log point
   # then no "new" data has been collected for this log point
-  # theoretically, this should only happen when first starting a log
   if ( $data[-1]->{'time'} < $last_logged ) {
-    eventLog( 'No new data, not logging' );
-    return 0;
+    eventLog( sprintf( "%s Tilt: no new data since %s, not logging!", uc($name), strftime( "%D %r", localtime($last_logged) ) ) );
+    return;
   }
 
   # reset data for next interval
@@ -859,27 +902,66 @@ sub logPoint {
                       "Color=%s&" .
                       "Comment=%.01f", $log_time, $temp_avg, $sg_avg, $log{$name}{'beer'}, uc($name), $rssi_avg );
 
-  $req->content($body);
-
   # first, add this data point to the internal log so we can export it later
   push @{ $log{$name}{'csv'} }, $body;
 
-  my @body = split /&/, $body;
+  # for Google sheets. swap out the RSSI for email address on the first log point
+  # this is the indication to Google to create a new log sheet
+  if ($init) {
+    $body =~ s/(Comment=).*$/$1$log{$name}{'email'}/;
+  }
+
+  my @body = split qr/&/, $body;
   my $event = 'Attempting to POST data point';
     $event .= "\nAverage of $num_data points";
     $event .= "\nHTML body:";
     $event .= "\n  " . join "&\n  ", @body;
   eventLog($event);
 
-  my $lwp = LWP::UserAgent->new;
-  my $resp = $lwp->request($req);
+  # actually POST the data to the cloud
+  return sendPoint( $name, $body );
+}
 
+
+sub sendPoint {
+  my ( $name, $body ) = @_;
+
+  my $req = HTTP::Request->new( 'POST', $log{$name}{'url'} );
+  $req->header( 'Content-Type' => 'application/x-www-form-urlencoded; charset=utf-8' );
+  $req->content($body);
+
+  my $ua = LWP::UserAgent->new;
+  $ua->requests_redirectable( ['GET', 'HEAD', 'POST'] );  # required for Google sheets HTTPS redirects
+
+  my $resp = $ua->request($req);
+
+  # unsuccessful POST
   unless ( $resp->is_success ) {
-    eventLog( sprintf( "Error logging data: %s", $resp->status_line ) );
+    eventLog( sprintf( "Error logging data: %s\n%s\n\n%s",
+                            $resp->status_line,
+                            $resp->message,
+                            $resp->decoded_content ) );
 
+  # successful POST
   } else {
     eventLog( sprintf( "Log success: %s", $resp->status_line ) );
+    my $data = decode_json( $resp->decoded_content );
+
+    # for Google sheets. need to update the beer name with the name returned by Google
+    # this will be the original beer name, appended with a command and unique number
+    # e.g. "lager" becomes "lager,123"
+    if ( exists $data->{beername} && $log{$name}{'beer'} ne $data->{beername} ) {
+      $log{$name}{'beer'} = $data->{beername};
+    }
+
+    # for Google sheets. grab the full URL to the log spreadsheet
+    if ( exists $data->{doclongurl} && exists $log{$name}{'doclongurl'}
+         && $log{$name}{'doclongurl'} ne $data->{doclongurl} ) {
+      $log{$name}{'doclongurl'} = $data->{doclongurl};
+    }
   }
+
+  return $resp->is_success;
 }
 
 
