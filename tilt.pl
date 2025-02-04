@@ -9,12 +9,13 @@
 # 1.01       04/30/24   Use Tilt logo as window icon
 #                       packPropagate to resize window as devices are added/removed
 #                       minor bug fixes
-# 1.1        02/03/25   Move bluetooth packet reading to separate thread
+# 1.1        02/04/25   Move bluetooth packet reading to separate thread
 #                       Google sheets support
 #                       Better dynamic dimensioning of GUI/widgets
 #                       Event and beacon data logs
 #                       Verbose switch at command line
 #                       Log state on Tilt display
+#                       Use JSON to store/load user options
 #
 # File: tilt.pl
 # Purpose: Read low energy bluetooth iBeacon data from Tilt hydrometer devices.
@@ -66,6 +67,10 @@ my $TIMEOUT = 120;
 # default to minimum log interval
 my $MIN_LOG_TIME = 15;  # minutes
 my $MAX_LOG_TIME = 60;
+
+# user supplied fields to save/load from config.json when launching/closing the tool
+my @cal_save = qw/sg temp/;
+my @log_save = qw/url beer interval email/;
 
 # periodic logger, to be started later
 my $logger;
@@ -467,95 +472,80 @@ sub sizeGUI {
 
 
 sub loadOpts {
-  my $file = 'config.ini';
+  my $file = 'config.json';
   return unless ( -e $file );
-  open INI, "$file" or die "Could not open '$file' for reading: $!";
 
-  my $name;
-  my $name_regex = join "|", @names;
-  $name_regex = qr{--($name_regex)}i;
+  open my $fh, "$file" or die "Could not open '$file' for reading: $!";
+  my $json = do { local($/); <$fh> };
+  close $fh;
 
-  eventLog('Loading configuration options');
+  my $options = decode_json($json);
 
-  while ( my $line = <INI> ) {
-    chomp($line);
+  foreach my $set ( keys %$options ) {
 
-    next if ( $line =~ /^#/ );     # skip comment lines (beginning with #)
-    next if ( $line eq '' );       # skip blank lines
-    next if ( $line =~ /^\s+$/ );  # skip only whitespace lines
-
-    if ( $line =~ $name_regex ) {
-      $name = lc($1);
+    # indicate when the options being loaded had last been saved
+    if ($set =~ /time/) {
+      eventLog("Loading $file options from $options->{$set}");
       next;
     }
 
-    unless ( defined $name && $name ~~ @names ) {
-      eventLog("Error: invalid Tilt color '$name' for config options");
+    # make sure the dataset being loaded is supported
+    if ( $set !~ /log|cal/i ) {
+      eventLog( "Error: skipping unsupported $file dataset '$set'" );
       next;
     }
 
-    my ($opt, $value) = split /[;,=|]/, $line, 2;
-    my $nm = uc($name) . ' Tilt';
+    # setup the appropriate hash reference to load the options into
+    my $h = $set =~ /log/i ? \%log : \%cal;
+    my @fields = $set =~ /log/i ? @log_save : @cal_save;
 
-    if ( $opt =~ /url/i ) {
-      eventLog( "$nm: setting log URL\n$value" );
-      $log{$name}{'url'} = $value;
+    foreach my $c ( keys %{ $options->{$set} } ) {
 
-    } elsif ( $opt =~ /beer|name/i ) {
-      eventLog( "$nm: setting log beer name\n'$value'" );
-      $log{$name}{'beer'} = $value;
+      # make sure the Tilt color being loaded is supported
+      unless ( $c ~~ @names && $c ne 'SEARCHING' ) {
+        eventLog( "Error: skipping unsupported Tilt color '$c'" );
+        next;
+      }
 
-    } elsif ( $opt =~ /time|int(erval)|period/i ) {
-      eventLog( "$nm: setting log interval = $value min" );
-      $log{$name}{'interval'} = $value;
+      foreach my $field ( keys %{ $options->{$set}{$c} } ) {
 
-    } elsif ( $opt =~ /sg/i ) {
-      eventLog( "$nm: setting cal SG = $value" );
-      $cal{$name}{'sg'} = $value;
+        # make sure the field being loaded is allowed for this dataset
+        unless ( $field ~~ @fields ) {
+          eventLog( "Error: skipping unsupported $set field '$field' for $c Tilt" );
+          next;
+        }
 
-    } elsif ( $opt =~ /temp/i ) {
-      eventLog( "$nm: setting cal temp = $value" );
-      $cal{$name}{'temp'} = $value;
-
-    } elsif ( $opt =~ /email/i ) {
-      eventLog( "$nm: setting email = $value" );
-      $log{$name}{'email'} = $value;
-
-    } else {
-      eventLog( "Error: invalid option '$opt' for $nm!" );
+        # store the option from the config file in the global hash
+        $h->{$c}{$field} = $options->{$set}{$c}{$field};
+      }
     }
   }
-
-  close INI;
 }
 
 
 sub writeOpts {
-  my $file = 'config.ini';
-  open INI, ">$file" or die "Could not open '$file' for writing: $!";
-  printf INI "# Tilt hydrometer configuration options\n" .
-             "# written: %s\n\n", strftime( "%D %r", localtime(time) );
 
-  my %opt_names;
-  map { $opt_names{$_} = undef } ( keys %cal, keys %log );
+  # we're only saving options on exit, so we can alter the original hashes
+  # otherwise, we'd need to make copies of these first
+  my $options = { cal => \%cal, log => \%log, time => strftime( "%D %r", localtime(time) ) };
 
-  foreach my $name (keys %opt_names) {
-    printf INI "--%s\n", uc($name);
-
-    foreach my $key (qw/url beer interval email/) {
-      next unless ( defined $log{$name}{$key} );
-      print INI "$key=$log{$name}{$key}\n";
-    }
-
-    foreach my $key (qw/sg temp/) {
-      next unless ( defined $cal{$name}{$key} );
-      print INI "$key=$cal{$name}{$key}\n";
-    }
-
-    print INI "\n";
+  # only store options that have been pre-definied
+  foreach my $c (keys %cal) {
+    map { delete $cal{$c}{$_} unless ( $_ ~~ @cal_save ) } ( keys %{ $cal{$c} } );
   }
 
-  close INI;
+  foreach my $c (keys %log) {
+    map { delete $log{$c}{$_} unless ( $_ ~~ @log_save ) } ( keys %{ $log{$c} } );
+  }
+
+  # write out the JSON config file
+  my $file = 'config.json';
+  open my $fh, ">$file" or die "Could not open '$file' for writing: $!";
+  my $json = JSON->new->pretty->encode($options);
+  print $fh $json;
+  close $fh;
+
+  eventLog("Saved $file options");
 }
 
 
@@ -1268,6 +1258,6 @@ sub quit {
   $bt_thread->detach() if $bt_thread;
 
   writeOpts();
+  eventLog('EXITING');
   exit 0;
 }
-
