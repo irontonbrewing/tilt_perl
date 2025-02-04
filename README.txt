@@ -37,7 +37,23 @@ REFERENCE:
     Tilt iBeacon git python libraries: https://github.com/frawau/aioblescan  (not used here)
 
 
-TO INSTALL:
+INSTALL WITH DEBIAN:
+
+# Install with Debian package from my PPA GitHub
+# This automates dependency installations, and allows for easy updates later
+# the below commands are only needed on initial install
+curl -s --compressed "https://irontonbrewing.github.io/ppa/KEY.gpg" | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/irontonbrewing.gpg >/dev/null
+sudo curl -s --compressed -o /etc/apt/sources.list.d/irontonbrewing.list "https://irontonbrewing.github.io/ppa/irontonbrewing.list"
+sudo apt update
+sudo apt install tilt-perl
+
+
+MANUAL INSTALL:
+
+# first need to clone git repository from GitHub
+git clone https://github.com/irontonbrewing/tilt_perl ~/tilt-perl
+
+# now manually install dependencies
 
 # install hcidump for reading raw bluetooth advertised packet data
 sudo apt-get install bluez-hcidump
@@ -61,9 +77,10 @@ sudo apt-get install libssl-dev
 sudo apt-get install zlib1g-dev
 sudo cpanm LWP::Protocol::https
 
+# Note [optional]:
 # if you want to run hcitool and hcidump as a normal user, grant the appropriate capabilities to the executables
 # then remove the 'sudo' calls in the perl script
-# note this may have security implications
+# WARN: this may have security implications
 sudo setcap 'cap_net_raw,cap_net_admin+eip' `which hcitool`
 sudo setcap 'cap_net_raw,cap_net_admin+eip' `which hciconfig`
 
