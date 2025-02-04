@@ -102,6 +102,11 @@ TO USE:
              device level calibration in prepared sugar solutions is recommended
     d) Note: calibration will be applied upon the next subsequent reading
 
+Known issues:
+    Testing on Raspberry Pi/Debian Bookworm often produces a warning at launch:
+        "Set scan parameters failed: Input/output error"
+    This is a benign issue with the `hcitool` command and can be ignored.
+
 Exporting data:
     File => Export data => <color>
     When logging is active, the tool stores the logged data locally to be exported on the local file system.
