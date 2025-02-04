@@ -40,7 +40,7 @@ REFERENCE:
 TO INSTALL:
 
 # install hcidump for reading raw bluetooth advertised packet data
-sudo apt-get install hcidump
+sudo apt-get install bluez-hcidump
 
 # install Perl-Tk for Perl GUI toolkit
 sudo apt-get install perl-tk
