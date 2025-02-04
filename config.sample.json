@@ -1,0 +1,24 @@
+{
+   "comment" : "Ironton's setting @ 02/04/25 01:33:46 PM",
+   "cal" : {
+      "green" : {
+         "sg" : -0.0124
+      },
+      "purple" : {
+         "sg" : -0.0124,
+         "temp" : 0.3
+      }
+   },
+   "log" : {
+      "green" : {
+         "email" : "irontonbrewing@gmail.com",
+         "url" : "https://script.google.com/macros/<URL>",
+         "interval" : "15",
+         "beer" : "lager"
+      },
+      "purple" : {
+         "url" : "http://log.brewfather.net/tilt?id=<ID>",
+         "interval" : "45"
+      }
+   }
+}

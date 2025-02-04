@@ -483,9 +483,9 @@ sub loadOpts {
 
   foreach my $set ( keys %$options ) {
 
-    # indicate when the options being loaded had last been saved
-    if ($set =~ /time/) {
-      eventLog("Loading $file options from $options->{$set}");
+    # indicate any comments from the options being loaded
+    if ($set =~ /comment/) {
+      eventLog("Loading $file options: $options->{$set}");
       next;
     }
 
@@ -527,7 +527,7 @@ sub writeOpts {
 
   # we're only saving options on exit, so we can alter the original hashes
   # otherwise, we'd need to make copies of these first
-  my $options = { cal => \%cal, log => \%log, time => strftime( "%D %r", localtime(time) ) };
+  my $options = { cal => \%cal, log => \%log, comment => strftime( "%D %r", localtime(time) ) };
 
   # only store options that have been pre-definied
   foreach my $c (keys %cal) {
