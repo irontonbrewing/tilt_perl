@@ -16,6 +16,7 @@
 #                       Verbose switch at command line
 #                       Log state on Tilt display
 #                       Use JSON to store/load user options
+#                       Debian package support
 #
 # File: tilt.pl
 # Purpose: Read low energy bluetooth iBeacon data from Tilt hydrometer devices.
@@ -71,6 +72,9 @@ my $MAX_LOG_TIME = 60;
 # user supplied fields to save/load from config.json when launching/closing the tool
 my @cal_save = qw/sg temp/;
 my @log_save = qw/url beer interval email/;
+my $user_dir = "$ENV{HOME}/.tilt";
+my $config_json = "$user_dir/config.json";
+mkdir ($user_dir) unless ( -d $user_dir );
 
 # periodic logger, to be started later
 my $logger;
@@ -448,8 +452,15 @@ sub initGUI {
   $SIG{INT} = \&quit;
 
   # load the Tilt logo
-  $logo = $mw->Photo( -file => './tilt_logo.png' );
-  $mw->iconimage( $mw->Photo( -file => './tilt_icon.jpg' ) );
+  my $img_path = '/usr/share/tilt';
+
+  my $png = "$img_path/tilt_logo.png";
+  my $jpg = "$img_path/tilt_icon.jpg";
+  $png = "./tilt_logo.png" if ( !-e $png && -e "./tilt_logo.png" );
+  $jpg = "./tilt_icon.jpg" if ( !-e $jpg && -e "./tilt_icon.jpg" );
+
+  $logo = $mw->Photo( -file => $png );
+  $mw->iconimage( $mw->Photo( -file => $jpg ) );
 
   # create some fonts
   $tinyFont  = $mw->fontCreate( 'tiny',  -family => 'Courier',   -size => 9,  -weight => 'bold' );
@@ -472,10 +483,9 @@ sub sizeGUI {
 
 
 sub loadOpts {
-  my $file = 'config.json';
-  return unless ( -e $file );
+  return unless ( -e $config_json );
 
-  open my $fh, "$file" or die "Could not open '$file' for reading: $!";
+  open my $fh, "$config_json" or die "Could not open '$config_json' for reading: $!";
   my $json = do { local($/); <$fh> };
   close $fh;
 
@@ -485,13 +495,13 @@ sub loadOpts {
 
     # indicate any comments from the options being loaded
     if ($set =~ /comment/) {
-      eventLog("Loading $file options: $options->{$set}");
+      eventLog("Loading $config_json options: $options->{$set}");
       next;
     }
 
     # make sure the dataset being loaded is supported
     if ( $set !~ /log|cal/i ) {
-      eventLog( "Error: skipping unsupported $file dataset '$set'" );
+      eventLog( "Error: skipping unsupported config dataset '$set'" );
       next;
     }
 
@@ -539,13 +549,12 @@ sub writeOpts {
   }
 
   # write out the JSON config file
-  my $file = 'config.json';
-  open my $fh, ">$file" or die "Could not open '$file' for writing: $!";
+  open my $fh, ">$config_json" or die "Could not open '$config_json' for writing: $!";
   my $json = JSON->new->pretty->encode($options);
   print $fh $json;
   close $fh;
 
-  eventLog("Saved $file options");
+  eventLog("Saved config options to $config_json");
 }
 
 
@@ -1082,7 +1091,7 @@ sub exportData {
 
   my $header_done = 0;
   for my $i ( 0 .. $#data ) {
-    my @parts = split /&/, $data[$i];
+    my @parts = split qr{&}, $data[$i];
 
     my @line;
     foreach my $part (@parts) {
