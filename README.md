@@ -60,7 +60,7 @@ Download and install the Debian package from the [irontonbrewing](https://github
    tilt -v
    tilt -v -v
    ```
-> [!NOTE]
+> **Note:**
 > The tilt application is installed in ``/usr/bin``
 
 2) A generic "searching" screen is displayed until a Tilt is detected
@@ -75,12 +75,12 @@ Download and install the Debian package from the [irontonbrewing](https://github
     - A valid email is also required, for Google sheets logging only
     - Click START
     - Any errors will be displayed in the "Status:" area
-> [!NOTE]
+> **Note:**
 > logging gathers data over the specified interval and posts an average of the collection
 
 5) To add a calibration offset: ``Configure => Calibrate => <color> => <cal choice>``
     - Manual calibrations will open a popup window to enter the offset
-> [!NOTE]
+> **Note:**
 > - only a single calibration offset is currently supported; device level calibration in prepared sugar solutions is recommended.
 > - calibration will be applied upon the next subsequent reading
 
@@ -97,7 +97,7 @@ Set scan parameters failed: Input/output error
     - When logging is active, the tool stores the logged data locally to be exported on the local file system.
     - The user will be prompted with a browser dialogue to select a location and file name.
     - The data will be exported in CSV format.
-> [!NOTE]
+> **Note:**
 > the "comments" field is currently used to record average signal strength (RSSI)
 
 2) User settings:
@@ -115,7 +115,7 @@ Set scan parameters failed: Input/output error
         - Displays timestamped information from the individual Tilt bluetooth packets as they are processed by the tool. This is meant for troubleshooting and is not normally of interest, but could be used to confirm bluetooth functionality.
         - This is information is excessive, is not stored, and is lost when closing this log.
         - This information is echoed to the terminal window when using the "-v -v" command line switch.
-> [!TIP]
+> **Tip:**
 > this log can be monitored to obtain the device's battery age, which is periodically reported.
      
 # About
