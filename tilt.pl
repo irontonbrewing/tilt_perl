@@ -142,6 +142,11 @@ sub readBeacon {
   # hci1 = first additional antenna
   # hcix = other antenna
 
+  # Note: if you wish to run hcitool and hcidump as a normal user, grant the appropriate capabilities
+  # to the executables then remove the sudo calls below. WARN: this may have security implications!
+  # sudo setcap 'cap_net_raw,cap_net_admin+eip' `which hcitool`
+  # sudo setcap 'cap_net_raw,cap_net_admin+eip' `which hciconfig`
+
   my $cmd = 'sudo hcitool -i hci0 lescan --duplicates | sudo hcidump -i hci0 -tR';
   open(my $BT, '-|', $cmd) or die "Cannot run '$cmd': $!";
 
